@@ -239,19 +239,29 @@ fi
 # ============================================
 # TEST 5: Custom landing page set via API returns custom content
 # ============================================
-CUSTOM_HTML="<html><body><h1>Fork Custom Landing Page</h1></body></html>"
+CUSTOM_HTML="<h1>PiDoH Encrypted MapleDNS</h1><p>Visit <a href=\"https://maplecube.net/pidoh\">maplecube.net/pidoh</a> to learn more.</p>"
 ENCODED_HTML=$(printf '%s' "$CUSTOM_HTML" | sed 's/ /%20/g; s/</%3C/g; s/>/%3E/g')
 SET_RESULT=$(curl -s "http://localhost:${WEB_PORT}/api/settings/set?token=${TOKEN}&dohCustomLandingPageHtml=${ENCODED_HTML}" 2>/dev/null)
 SET_STATUS=$(echo "$SET_RESULT" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
 if [[ "$SET_STATUS" == "ok" ]]; then
     GET_RESULT=$(curl -s "http://localhost:${WEB_PORT}/api/settings/get?token=${TOKEN}" 2>/dev/null)
-    if echo "$GET_RESULT" | grep -q "Fork Custom Landing Page"; then
+    if echo "$GET_RESULT" | grep -q "PiDoH Encrypted MapleDNS"; then
         log_test "5. Custom landing page set via API" "PASS"
     else
         log_test "5. Custom landing page set via API" "FAIL" "Set OK but value not found in GET"
     fi
 else
     log_test "5. Custom landing page set via API" "FAIL" "Set returned: $SET_STATUS"
+fi
+
+# ============================================
+# TEST 5b: DoH root URL serves custom landing page
+# ============================================
+LANDING_BODY=$(curl -sk "https://localhost:${DOH_PORT}/" 2>/dev/null)
+if echo "$LANDING_BODY" | grep -q "PiDoH Encrypted MapleDNS"; then
+    log_test "5b. DoH root URL serves custom landing page" "PASS"
+else
+    log_test "5b. DoH root URL serves custom landing page" "FAIL" "Custom HTML not found in response"
 fi
 
 # ============================================
