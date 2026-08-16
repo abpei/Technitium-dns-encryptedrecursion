@@ -1,0 +1,8 @@
+{
+    "updateVersion": "15.4.0",
+    "updateTitle": "New Update Available!",
+    "updateMessage": "A new version of the Technitium DNS encrypted-recursion fork is available. See the changelog for details.",
+    "downloadLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases",
+    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases",
+    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/blob/master/CHANGELOG.md"
+}

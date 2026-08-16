@@ -65,18 +65,7 @@ namespace DnsServerApp
                 if (!isPortableApp)
                     isPortableApp = configFolder is null; //no config folder specified so run as portable app
 
-                Uri updateCheckUri;
-
-                switch (Environment.OSVersion.Platform)
-                {
-                    case PlatformID.Win32NT:
-                        updateCheckUri = new Uri("https://go.technitium.com/?id=41");
-                        break;
-
-                    default:
-                        updateCheckUri = new Uri("https://go.technitium.com/?id=42");
-                        break;
-                }
+                Uri updateCheckUri = new Uri("https://raw.githubusercontent.com/abpei/Technitium-dns-encryptedrecursion/master/update.json");
 
                 service = new DnsWebService(isPortableApp, configFolder, updateCheckUri);
                 await service.StartAsync(throwIfBindFails);
