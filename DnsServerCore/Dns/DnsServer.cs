@@ -70,7 +70,8 @@ namespace DnsServerCore.Dns
         Deny = 0,
         Allow = 1,
         AllowOnlyForPrivateNetworks = 2,
-        UseSpecifiedNetworkACL = 3
+        UseSpecifiedNetworkACL = 3,
+        AllowOnlyForOptionalProtocols = 4
     }
 
     public enum DnsServerBlockingType : byte
@@ -205,6 +206,7 @@ namespace DnsServerCore.Dns
         bool _enableDnsOverHttp3;
         bool _enableDnsOverQuic;
         bool _enableDnsOverHttpHelpRedirect = true;
+        string _dohCustomLandingPageHtml;
         int _dnsOverUdpProxyPort = 538;
         int _dnsOverTcpProxyPort = 538;
         int _dnsOverHttpPort = 80;
@@ -909,6 +911,17 @@ namespace DnsServerCore.Dns
                     _enableDnsOverHttpHelpRedirect = true;
             }
 
+            if (version >= 6)
+            {
+                _dohCustomLandingPageHtml = bR.ReadString();
+                if (_dohCustomLandingPageHtml.Length == 0)
+                    _dohCustomLandingPageHtml = null;
+            }
+            else
+            {
+                _dohCustomLandingPageHtml = null;
+            }
+
             int dnsOverUdpProxyPort = bR.ReadInt32();
             if (!isConfigTransfer)
                 _dnsOverUdpProxyPort = dnsOverUdpProxyPort;
@@ -1352,6 +1365,8 @@ namespace DnsServerCore.Dns
             bW.Write(_enableDnsOverQuic);
 
             bW.Write(_enableDnsOverHttpHelpRedirect);
+
+            bW.Write(_dohCustomLandingPageHtml ?? string.Empty);
 
             bW.Write(_dnsOverUdpProxyPort);
             bW.Write(_dnsOverTcpProxyPort);
@@ -2001,7 +2016,7 @@ namespace DnsServerCore.Dns
 
             try
             {
-                bool recursionAllowed = IsRecursionAllowed(remoteEP.Address);
+                bool recursionAllowed = IsRecursionAllowed(remoteEP.Address, protocol);
                 DnsDatagram response;
 
                 if (sendTruncationResponse)
@@ -2309,7 +2324,7 @@ namespace DnsServerCore.Dns
         {
             try
             {
-                DnsDatagram response = await ProcessRequestAsync(request, remoteEP, protocol, IsRecursionAllowed(remoteEP.Address));
+                DnsDatagram response = await ProcessRequestAsync(request, remoteEP, protocol, IsRecursionAllowed(remoteEP.Address, protocol));
                 if (response is null)
                 {
                     await stream.DisposeAsync();
@@ -2478,7 +2493,7 @@ namespace DnsServerCore.Dns
                 }
 
                 //process request async
-                DnsDatagram response = await ProcessRequestAsync(request, remoteEP, DnsTransportProtocol.Quic, IsRecursionAllowed(remoteEP.Address));
+                DnsDatagram response = await ProcessRequestAsync(request, remoteEP, DnsTransportProtocol.Quic, IsRecursionAllowed(remoteEP.Address, DnsTransportProtocol.Quic));
                 if (response is null)
                 {
                     _statsManager.QueueUpdate(null, remoteEP, DnsTransportProtocol.Quic, null, false);
@@ -2675,7 +2690,7 @@ namespace DnsServerCore.Dns
                         throw new InvalidOperationException();
                 }
 
-                DnsDatagram dnsResponse = await ProcessRequestAsync(dnsRequest, remoteEP, DnsTransportProtocol.Https, IsRecursionAllowed(remoteEP.Address));
+                DnsDatagram dnsResponse = await ProcessRequestAsync(dnsRequest, remoteEP, DnsTransportProtocol.Https, IsRecursionAllowed(remoteEP.Address, DnsTransportProtocol.Https));
                 if (dnsResponse is null)
                 {
                     //drop request
@@ -2742,6 +2757,26 @@ namespace DnsServerCore.Dns
                 default:
                     return false;
             }
+        }
+
+        private bool IsRecursionAllowed(IPAddress remoteIP, DnsTransportProtocol protocol)
+        {
+            if (_recursion == DnsServerRecursion.AllowOnlyForOptionalProtocols)
+            {
+                // Allow recursion only for encrypted transports: DoT, DoH, DoQ
+                switch (protocol)
+                {
+                    case DnsTransportProtocol.Tls:
+                    case DnsTransportProtocol.Https:
+                    case DnsTransportProtocol.Quic:
+                        return true;
+
+                    default:
+                        return false; // Deny for Udp, Tcp, UdpProxy, TcpProxy
+                }
+            }
+
+            return IsRecursionAllowed(remoteIP); // Delegate to existing IP-based logic
         }
 
         private async Task<DnsDatagram> ProcessRequestAsync(DnsDatagram request, IPEndPoint remoteEP, DnsTransportProtocol protocol, bool isRecursionAllowed)
@@ -6346,6 +6381,21 @@ namespace DnsServerCore.Dns
                     ServeUnknownFileTypes = true
                 });
 
+                _dohWebService.MapGet("/", async context =>
+                {
+                    if (_dohCustomLandingPageHtml is not null)
+                    {
+                        context.Response.ContentType = "text/html";
+                        context.Response.Headers.CacheControl = "no-cache";
+                        context.Response.Headers["X-Robots-Tag"] = "noindex, nofollow";
+                        await context.Response.WriteAsync(_dohCustomLandingPageHtml);
+                        return;
+                    }
+
+                    // fall through to static files (default index.html)
+                    context.Response.Redirect("/index.html");
+                });
+
                 _dohWebService.UseRouting();
                 _dohWebService.MapGet("/dns-query", ProcessDoHRequestAsync);
                 _dohWebService.MapPost("/dns-query", ProcessDoHRequestAsync);
@@ -7499,6 +7549,12 @@ namespace DnsServerCore.Dns
         {
             get { return _enableDnsOverHttpHelpRedirect; }
             set { _enableDnsOverHttpHelpRedirect = value; }
+        }
+
+        public string DohCustomLandingPageHtml
+        {
+            get { return _dohCustomLandingPageHtml; }
+            set { _dohCustomLandingPageHtml = string.IsNullOrEmpty(value) ? null : value; }
         }
 
         public int DnsOverUdpProxyPort
