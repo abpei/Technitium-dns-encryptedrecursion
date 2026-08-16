@@ -239,6 +239,8 @@ namespace DnsServerCore
 
                 jsonWriter.WriteBoolean("enableDnsOverHttpHelpRedirect", _dnsWebService._dnsServer.EnableDnsOverHttpHelpRedirect);
 
+                jsonWriter.WriteString("dohCustomLandingPageHtml", _dnsWebService._dnsServer.DohCustomLandingPageHtml);
+
                 jsonWriter.WriteNumber("dnsOverUdpProxyPort", _dnsWebService._dnsServer.DnsOverUdpProxyPort);
                 jsonWriter.WriteNumber("dnsOverTcpProxyPort", _dnsWebService._dnsServer.DnsOverTcpProxyPort);
                 jsonWriter.WriteNumber("dnsOverHttpPort", _dnsWebService._dnsServer.DnsOverHttpPort);
@@ -1169,6 +1171,9 @@ namespace DnsServerCore
 
                         if (request.TryGetQueryOrForm("enableDnsOverHttpHelpRedirect", bool.Parse, out bool enableDnsOverHttpHelpRedirect))
                             _dnsWebService._dnsServer.EnableDnsOverHttpHelpRedirect = enableDnsOverHttpHelpRedirect;
+
+                        if (request.TryGetQueryOrForm("dohCustomLandingPageHtml", out string dohCustomLandingPageHtml))
+                            _dnsWebService._dnsServer.DohCustomLandingPageHtml = dohCustomLandingPageHtml;
 
                         if (request.TryGetQueryOrForm("dnsOverUdpProxyPort", int.Parse, out int dnsOverUdpProxyPort))
                         {

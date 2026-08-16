@@ -1649,6 +1649,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                                                         </div>
 
                                                         <div class="form-group">
+                                                            <label for="txtDohCustomLandingPageHtml" class="col-sm-3 control-label">DNS-over-HTTPS Custom Landing Page HTML</label>
+                                                            <div class="col-sm-8">
+                                                                <textarea id="txtDohCustomLandingPageHtml" class="form-control" rows="10" spellcheck="false" placeholder="Enter custom HTML with inline CSS for the DoH landing page. Leave empty to use the default Technitium help page."></textarea>
+                                                                <div style="padding-top: 5px;">Custom HTML content served at the DoH root URL (<code>/</code>) when a browser visits it. Supports HTML and inline CSS. Leave empty to serve the default help page.</div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="form-group">
                                                             <label for="txtDnsOverUdpProxyPort" class="col-sm-3 control-label">DNS-over-UDP-PROXY Port</label>
                                                             <div class="col-sm-6">
                                                                 <input type="number" class="form-control" id="txtDnsOverUdpProxyPort" placeholder="port" style="width: 100px; display: inline;">
@@ -1823,6 +1831,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                                                                         Use Specified Network Access Control List (ACL)
                                                                     </label>
                                                                     <div style="padding-top: 5px; padding-left: 20px;">Select this option to specify networks that must be allowed or denied recursion.</div>
+                                                                </div>
+                                                                <div class="radio">
+                                                                    <label>
+                                                                        <input type="radio" name="rdRecursion" id="rdRecursionAllowOnlyForOptionalProtocols" value="AllowOnlyForOptionalProtocols">
+                                                                        Allow Recursion Only For Encrypted Protocols (DoH, DoT, DoQ)
+                                                                    </label>
+                                                                    <div style="padding-top: 5px; padding-left: 20px;">Select this option to allow recursion only via DNS-over-HTTPS, DNS-over-TLS, and DNS-over-QUIC. Recursion via plain DNS (UDP/TCP port 53) will be denied to prevent DNS amplification attacks. Authoritative zones still respond on all protocols.</div>
                                                                 </div>
                                                             </div>
                                                             <div class="col-sm-offset-3 col-sm-6">
