@@ -1,7 +1,7 @@
 {
-    "updateVersion": "15.4.0.1",
-    "updateTitle": "Fork Update v15.4.0-dev1 Available!",
-    "updateMessage": "A new version of the encrypted-recursion fork is available. This adds per-protocol recursion control, fork update URL, and configurable DoH landing page.",
-    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-dev1",
-    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-dev1"
+    "updateVersion": "15.4.0.2",
+    "updateTitle": "Fork Update v15.4.0-dev2 Available!",
+    "updateMessage": "A new version of the encrypted-recursion fork is available. This adds a fork version label and fixes the DoH custom landing page.",
+    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-dev2",
+    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-dev2"
 }
