@@ -6538,17 +6538,6 @@ namespace DnsServerCore.Dns
 
                 _dohWebService = builder.Build();
 
-                _dohWebService.UseDefaultFiles();
-                _dohWebService.UseStaticFiles(new StaticFileOptions()
-                {
-                    OnPrepareResponse = delegate (StaticFileResponseContext ctx)
-                    {
-                        ctx.Context.Response.Headers["X-Robots-Tag"] = "noindex, nofollow";
-                        ctx.Context.Response.Headers.CacheControl = "no-cache";
-                    },
-                    ServeUnknownFileTypes = true
-                });
-
                 _dohWebService.MapGet("/", async context =>
                 {
                     if (_dohCustomLandingPageHtml is not null)
@@ -6562,6 +6551,17 @@ namespace DnsServerCore.Dns
 
                     // fall through to static files (default index.html)
                     context.Response.Redirect("/index.html");
+                });
+
+                _dohWebService.UseDefaultFiles();
+                _dohWebService.UseStaticFiles(new StaticFileOptions()
+                {
+                    OnPrepareResponse = delegate (StaticFileResponseContext ctx)
+                    {
+                        ctx.Context.Response.Headers["X-Robots-Tag"] = "noindex, nofollow";
+                        ctx.Context.Response.Headers.CacheControl = "no-cache";
+                    },
+                    ServeUnknownFileTypes = true
                 });
 
                 _dohWebService.UseRouting();
