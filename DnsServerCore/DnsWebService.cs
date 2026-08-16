@@ -1646,7 +1646,40 @@ namespace DnsServerCore
 
         private string GetServerVersion()
         {
-            return GetCleanVersion(_currentVersion);
+            string version = GetCleanVersion(_currentVersion);
+            string forkLabel = GetForkLabel();
+            return forkLabel is not null ? version + " (" + forkLabel + ")" : version;
+        }
+
+        private static string GetForkLabel()
+        {
+            try
+            {
+                string assemblyDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+                string forkJsonPath = Path.Combine(assemblyDir, "fork.json");
+
+                if (!File.Exists(forkJsonPath))
+                    return null;
+
+                string json = File.ReadAllText(forkJsonPath);
+                using JsonDocument doc = JsonDocument.Parse(json);
+                JsonElement root = doc.RootElement;
+
+                string forkBranch = root.TryGetProperty("forkBranch", out JsonElement branch) ? branch.GetString() : null;
+                string forkVersion = root.TryGetProperty("forkVersion", out JsonElement ver) ? ver.GetString() : null;
+
+                if (forkBranch is null && forkVersion is null)
+                    return null;
+
+                if (forkBranch is not null && forkVersion is not null)
+                    return forkBranch + " \u2014 " + forkVersion;
+
+                return forkVersion ?? forkBranch;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static string GetCleanVersion(Version version)
