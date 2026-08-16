@@ -6538,9 +6538,11 @@ namespace DnsServerCore.Dns
 
                 _dohWebService = builder.Build();
 
-                _dohWebService.MapGet("/", async context =>
+                // Use inline middleware that executes BEFORE terminal middleware (UseDefaultFiles, UseStaticFiles)
+                // This ensures custom landing page is served before the default index.html
+                _dohWebService.Use(async (context, next) =>
                 {
-                    if (_dohCustomLandingPageHtml is not null)
+                    if (context.Request.Path == "/" && _dohCustomLandingPageHtml is not null)
                     {
                         context.Response.ContentType = "text/html";
                         context.Response.Headers.CacheControl = "no-cache";
@@ -6549,8 +6551,8 @@ namespace DnsServerCore.Dns
                         return;
                     }
 
-                    // fall through to static files (default index.html)
-                    context.Response.Redirect("/index.html");
+                    // Not custom landing page - continue to next middleware
+                    await next();
                 });
 
                 _dohWebService.UseDefaultFiles();
