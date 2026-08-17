@@ -265,14 +265,25 @@ else
 fi
 
 # ============================================
-# TEST 6: Recursion on port 53 denied with RA=0 for AllowOnlyForOptionalProtocols
+# TEST 6a: Query from host to mapped DNS port, expect RA=0 (non-loopback denied)
 # ============================================
 DIG_OUTPUT=$(dig @localhost -p "${DNS_PORT}" example.com A +norecurse 2>&1 || true)
 FLAGS=$(echo "$DIG_OUTPUT" | grep -o "flags: [^;]*" | head -1)
 if echo "$FLAGS" | grep -qv "ra"; then
-    log_test "6. Recursion on port 53 denied (RA=0)" "PASS" "Flags: $FLAGS"
+    log_test "6a. Recursion denied from host (RA=0)" "PASS" "Flags: $FLAGS"
 else
-    log_test "6. Recursion on port 53 denied (RA=0)" "FAIL" "RA flag present: $FLAGS"
+    log_test "6a. Recursion denied from host (RA=0)" "FAIL" "RA flag present: $FLAGS"
+fi
+
+# ============================================
+# TEST 6b: Query from inside container via loopback, expect RA=1 (loopback exempted)
+# ============================================
+DIG_LOOPBACK=$(docker exec "$CONTAINER_NAME" dig @127.0.0.1 -p "53" example.com A +norecurse 2>&1 || true)
+LOOPBACK_FLAGS=$(echo "$DIG_LOOPBACK" | grep -o "flags: [^;]*" | head -1)
+if echo "$LOOPBACK_FLAGS" | grep -q "ra"; then
+    log_test "6b. Recursion allowed from loopback (RA=1)" "PASS" "Flags: $LOOPBACK_FLAGS"
+else
+    log_test "6b. Recursion allowed from loopback (RA=1)" "FAIL" "RA flag missing: $LOOPBACK_FLAGS"
 fi
 
 # ============================================
@@ -310,6 +321,17 @@ if [[ "$UPDATE_STATUS" == "ok" ]]; then
     fi
 else
     log_test "8. Update check API works" "FAIL" "Status: $UPDATE_STATUS"
+fi
+
+# ============================================
+# TEST 9: Fork label shows 'PiDoH |' in version string
+# ============================================
+VERSION_RESPONSE=$(curl -s "http://localhost:${WEB_PORT}/api/user/login?user=${API_USER}&pass=${API_PASS}&includeInfo=true" 2>/dev/null)
+VERSION=$(echo "$VERSION_RESPONSE" | grep -o '"version":"[^"]*"' | head -1 | cut -d'"' -f4)
+if echo "$VERSION" | grep -q "PiDoH |"; then
+    log_test "9. Fork label shows 'PiDoH |' in version string" "PASS" "Version: $VERSION"
+else
+    log_test "9. Fork label shows 'PiDoH |' in version string" "FAIL" "Version: $VERSION"
 fi
 
 # ============================================
