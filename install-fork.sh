@@ -1,6 +1,6 @@
 #!/bin/bash
 # Install or update the PIDOH Encrypted-Recursion Technitium DNS fork.
-# Usage: install-fork.sh [--dev|--master]
+# Usage: install-fork.sh [--dev|--master] [--force]
 # Default: --dev
 set -euo pipefail
 
@@ -10,14 +10,17 @@ SERVICE_NAME="dns.service"
 
 # Parse arguments
 BRANCH="dev"
+FORCE=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dev) BRANCH="dev"; shift ;;
         --master) BRANCH="master"; shift ;;
+        --force) FORCE=true; shift ;;
         -h|--help)
-            echo "Usage: $0 [--dev|--master]"
+            echo "Usage: $0 [--dev|--master] [--force]"
             echo "  --dev     Install latest dev release (default)"
             echo "  --master  Install latest master release"
+            echo "  --force   Skip version check, reinstall even if same version"
             exit 0
             ;;
         *) echo "Unknown option: $1"; exit 1 ;;
@@ -61,10 +64,13 @@ echo "Latest release: $TAG"
 echo ""
 
 # Check current installed version
-if [[ -f "${INSTALL_DIR}/fork.json" ]]; then
+if [[ "$FORCE" == "true" ]]; then
+    echo "Force mode: skipping version check"
+    echo ""
+elif [[ -f "${INSTALL_DIR}/fork.json" ]]; then
     CURRENT=$(python3 -c "import json; d=json.load(open('${INSTALL_DIR}/fork.json')); print(d.get('forkVersion','unknown'))" 2>/dev/null || echo "unknown")
     echo "Currently installed: $CURRENT"
-    if [[ "$CURRENT" == *"$TAG"* ]] || [[ "$TAG" == *"$CURRENT"* ]]; then
+    if [[ "$CURRENT" == "$TAG" ]]; then
         echo "Already up to date."
         exit 0
     fi
