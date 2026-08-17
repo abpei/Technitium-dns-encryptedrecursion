@@ -2731,6 +2731,9 @@ namespace DnsServerCore.Dns
         {
             if (_recursion == DnsServerRecursion.AllowOnlyForOptionalProtocols)
             {
+                if (IPAddress.IsLoopback(remoteIP))
+                    return true;
+
                 // Allow recursion only for encrypted transports: DoT, DoH, DoQ
                 switch (protocol)
                 {

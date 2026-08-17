@@ -1667,12 +1667,18 @@ namespace DnsServerCore
 
                 string forkBranch = root.TryGetProperty("forkBranch", out JsonElement branch) ? branch.GetString() : null;
                 string forkVersion = root.TryGetProperty("forkVersion", out JsonElement ver) ? ver.GetString() : null;
+                string forkShortName = root.TryGetProperty("forkShortName", out JsonElement name) ? name.GetString() : null;
 
                 if (forkBranch is null && forkVersion is null)
                     return null;
 
                 if (forkBranch is not null && forkVersion is not null)
+                {
+                    if (forkShortName is not null)
+                        return forkShortName + " | " + forkBranch + " \u2014 " + forkVersion;
+
                     return forkBranch + " \u2014 " + forkVersion;
+                }
 
                 return forkVersion ?? forkBranch;
             }
