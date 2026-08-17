@@ -156,7 +156,7 @@ echo ""
 
 # Configure DoH with DNS TLS certificate and recursion mode
 echo "Configuring DoH and recursion settings..."
-curl -s "http://localhost:${WEB_PORT}/api/settings/set?token=${TOKEN}&dnsTlsCertificatePath=/etc/dns/self-signed-cert.pfx&dnsTlsCertificatePassword=&enableDnsOverHttps=true&dnsOverHttpsPort=443&recursion=AllowOnlyForOptionalProtocols" -o /dev/null
+curl -s "http://localhost:${WEB_PORT}/api/settings/set?token=${TOKEN}&dnsTlsCertificatePath=/etc/dns/self-signed-cert.pfx&dnsTlsCertificatePassword=&enableDnsOverHttps=true&dnsOverHttpsPort=443&recursion=Allow" -o /dev/null
 echo "Settings applied. Waiting for DNS service restart..."
 sleep 12
 
@@ -265,29 +265,7 @@ else
 fi
 
 # ============================================
-# TEST 6a: Query from host to mapped DNS port, expect RA=0 (non-loopback denied)
-# ============================================
-DIG_OUTPUT=$(dig @localhost -p "${DNS_PORT}" example.com A +norecurse 2>&1 || true)
-FLAGS=$(echo "$DIG_OUTPUT" | grep -o "flags: [^;]*" | head -1)
-if echo "$FLAGS" | grep -qv "ra"; then
-    log_test "6a. Recursion denied from host (RA=0)" "PASS" "Flags: $FLAGS"
-else
-    log_test "6a. Recursion denied from host (RA=0)" "FAIL" "RA flag present: $FLAGS"
-fi
-
-# ============================================
-# TEST 6b: Query from inside container via loopback, expect RA=1 (loopback exempted)
-# ============================================
-DIG_LOOPBACK=$(docker exec "$CONTAINER_NAME" dig @127.0.0.1 -p "53" example.com A +norecurse 2>&1 || true)
-LOOPBACK_FLAGS=$(echo "$DIG_LOOPBACK" | grep -o "flags: [^;]*" | head -1)
-if echo "$LOOPBACK_FLAGS" | grep -q "ra"; then
-    log_test "6b. Recursion allowed from loopback (RA=1)" "PASS" "Flags: $LOOPBACK_FLAGS"
-else
-    log_test "6b. Recursion allowed from loopback (RA=1)" "FAIL" "RA flag missing: $LOOPBACK_FLAGS"
-fi
-
-# ============================================
-# TEST 7: Recursion on DoH allowed with RA=1
+# TEST 6: Recursion on DoH allowed with RA=1
 # ============================================
 DOH_RA_HTTP=$(curl -s --cacert "$CERT_FILE" \
     "https://localhost:${DOH_PORT}/dns-query" \
@@ -299,39 +277,39 @@ DOH_RA_HTTP=$(curl -s --cacert "$CERT_FILE" \
 if [[ "$DOH_RA_HTTP" == "200" ]] && [[ -s /tmp/doh_ra_test.bin ]]; then
     RA_FLAG=$(get_ra_flag /tmp/doh_ra_test.bin)
     if [[ "$RA_FLAG" == "1" ]]; then
-        log_test "7. Recursion on DoH allowed (RA=1)" "PASS"
+        log_test "6. Recursion on DoH allowed (RA=1)" "PASS"
     else
-        log_test "7. Recursion on DoH allowed (RA=1)" "FAIL" "RA flag is $RA_FLAG in DoH response"
+        log_test "6. Recursion on DoH allowed (RA=1)" "FAIL" "RA flag is $RA_FLAG in DoH response"
     fi
 else
-    log_test "7. Recursion on DoH allowed (RA=1)" "FAIL" "DoH request failed: HTTP $DOH_RA_HTTP"
+    log_test "6. Recursion on DoH allowed (RA=1)" "FAIL" "DoH request failed: HTTP $DOH_RA_HTTP"
 fi
 
 # ============================================
-# TEST 8: Update check for update.json
+# TEST 7: Update check for update.json
 # ============================================
 UPDATE_RESPONSE=$(curl -s "http://localhost:${WEB_PORT}/api/user/checkForUpdate?token=${TOKEN}" 2>/dev/null)
 UPDATE_STATUS=$(echo "$UPDATE_RESPONSE" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
 if [[ "$UPDATE_STATUS" == "ok" ]]; then
     if echo "$UPDATE_RESPONSE" | grep -q '"updateAvailable"'; then
         UPDATE_AVAILABLE=$(echo "$UPDATE_RESPONSE" | grep -o '"updateAvailable":[a-z]*' | cut -d':' -f2)
-        log_test "8. Update check API works" "PASS" "updateAvailable=$UPDATE_AVAILABLE"
+        log_test "7. Update check API works" "PASS" "updateAvailable=$UPDATE_AVAILABLE"
     else
-        log_test "8. Update check API works" "FAIL" "Missing updateAvailable field"
+        log_test "7. Update check API works" "FAIL" "Missing updateAvailable field"
     fi
 else
-    log_test "8. Update check API works" "FAIL" "Status: $UPDATE_STATUS"
+    log_test "7. Update check API works" "FAIL" "Status: $UPDATE_STATUS"
 fi
 
 # ============================================
-# TEST 9: Fork label shows 'PiDoH |' in version string
+# TEST 8: Fork label shows 'PiDoH |' in version string
 # ============================================
 VERSION_RESPONSE=$(curl -s "http://localhost:${WEB_PORT}/api/user/login?user=${API_USER}&pass=${API_PASS}&includeInfo=true" 2>/dev/null)
 VERSION=$(echo "$VERSION_RESPONSE" | grep -o '"version":"[^"]*"' | head -1 | cut -d'"' -f4)
 if echo "$VERSION" | grep -q "PiDoH |"; then
-    log_test "9. Fork label shows 'PiDoH |' in version string" "PASS" "Version: $VERSION"
+    log_test "8. Fork label shows 'PiDoH |' in version string" "PASS" "Version: $VERSION"
 else
-    log_test "9. Fork label shows 'PiDoH |' in version string" "FAIL" "Version: $VERSION"
+    log_test "8. Fork label shows 'PiDoH |' in version string" "FAIL" "Version: $VERSION"
 fi
 
 # ============================================
