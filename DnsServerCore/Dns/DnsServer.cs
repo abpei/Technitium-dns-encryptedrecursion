@@ -70,8 +70,7 @@ namespace DnsServerCore.Dns
         Deny = 0,
         Allow = 1,
         AllowOnlyForPrivateNetworks = 2,
-        UseSpecifiedNetworkACL = 3,
-        AllowOnlyForOptionalProtocols = 4
+        UseSpecifiedNetworkACL = 3
     }
 
     public enum DnsServerBlockingType : byte
@@ -2016,7 +2015,7 @@ namespace DnsServerCore.Dns
 
             try
             {
-                bool recursionAllowed = IsRecursionAllowed(remoteEP.Address, protocol);
+                bool recursionAllowed = IsRecursionAllowed(remoteEP.Address);
                 DnsDatagram response;
 
                 if (sendTruncationResponse)
@@ -2324,7 +2323,7 @@ namespace DnsServerCore.Dns
         {
             try
             {
-                DnsDatagram response = await ProcessRequestAsync(request, remoteEP, protocol, IsRecursionAllowed(remoteEP.Address, protocol));
+                DnsDatagram response = await ProcessRequestAsync(request, remoteEP, protocol, IsRecursionAllowed(remoteEP.Address));
                 if (response is null)
                 {
                     await stream.DisposeAsync();
@@ -2493,7 +2492,7 @@ namespace DnsServerCore.Dns
                 }
 
                 //process request async
-                DnsDatagram response = await ProcessRequestAsync(request, remoteEP, DnsTransportProtocol.Quic, IsRecursionAllowed(remoteEP.Address, DnsTransportProtocol.Quic));
+                DnsDatagram response = await ProcessRequestAsync(request, remoteEP, DnsTransportProtocol.Quic, IsRecursionAllowed(remoteEP.Address));
                 if (response is null)
                 {
                     _statsManager.QueueUpdate(null, remoteEP, DnsTransportProtocol.Quic, null, false);
@@ -2690,7 +2689,7 @@ namespace DnsServerCore.Dns
                         throw new InvalidOperationException();
                 }
 
-                DnsDatagram dnsResponse = await ProcessRequestAsync(dnsRequest, remoteEP, DnsTransportProtocol.Https, IsRecursionAllowed(remoteEP.Address, DnsTransportProtocol.Https));
+                DnsDatagram dnsResponse = await ProcessRequestAsync(dnsRequest, remoteEP, DnsTransportProtocol.Https, IsRecursionAllowed(remoteEP.Address));
                 if (dnsResponse is null)
                 {
                     //drop request
@@ -2757,29 +2756,6 @@ namespace DnsServerCore.Dns
                 default:
                     return false;
             }
-        }
-
-        private bool IsRecursionAllowed(IPAddress remoteIP, DnsTransportProtocol protocol)
-        {
-            if (_recursion == DnsServerRecursion.AllowOnlyForOptionalProtocols)
-            {
-                if (IPAddress.IsLoopback(remoteIP))
-                    return true;
-
-                // Allow recursion only for encrypted transports: DoT, DoH, DoQ
-                switch (protocol)
-                {
-                    case DnsTransportProtocol.Tls:
-                    case DnsTransportProtocol.Https:
-                    case DnsTransportProtocol.Quic:
-                        return true;
-
-                    default:
-                        return false; // Deny for Udp, Tcp, UdpProxy, TcpProxy
-                }
-            }
-
-            return IsRecursionAllowed(remoteIP); // Delegate to existing IP-based logic
         }
 
         private async Task<DnsDatagram> ProcessRequestAsync(DnsDatagram request, IPEndPoint remoteEP, DnsTransportProtocol protocol, bool isRecursionAllowed)
