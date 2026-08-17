@@ -245,6 +245,143 @@ public class ForkVersionTests
     }
 
     /// <summary>
+    /// Verifies that GetForkLabel() includes forkShortName when it is set in fork.json.
+    /// The format should be "forkShortName | forkBranch — forkVersion".
+    /// </summary>
+    [Fact]
+    public void GetForkLabel_WithForkShortName_ShouldIncludeShortName()
+    {
+        // Arrange
+        string tempDir = Path.Combine(Path.GetTempPath(), $"fork_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            // Create fork.json with forkShortName
+            var forkData = new Dictionary<string, object?>
+            {
+                ["forkName"] = "PIDOH Encrypted-Recursion Fork",
+                ["forkShortName"] = "PiDoH",
+                ["forkBranch"] = "dev",
+                ["forkVersion"] = "v15.4.0-dev3"
+            };
+
+            string forkJson = JsonSerializer.Serialize(forkData);
+            string forkJsonPath = Path.Combine(tempDir, ForkJsonFileName);
+            File.WriteAllText(forkJsonPath, forkJson);
+
+            // Act
+            string? result = GetForkLabelWithShortNameFromPath(forkJsonPath);
+
+            // Assert
+            Assert.NotNull(result);
+            Assert.Contains("PiDoH", result);
+            Assert.Contains("|", result);
+            Assert.Contains("dev", result);
+            Assert.Contains("v15.4.0-dev3", result);
+            Assert.Equal("PiDoH | dev \u2014 v15.4.0-dev3", result);
+        }
+        finally
+        {
+            // Cleanup
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, true);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that GetForkLabel() falls back to the old format when forkShortName is absent.
+    /// The format should be "forkBranch — forkVersion" without the short name prefix.
+    /// </summary>
+    [Fact]
+    public void GetForkLabel_WithoutForkShortName_ShouldUseOldFormat()
+    {
+        // Arrange
+        string tempDir = Path.Combine(Path.GetTempPath(), $"fork_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            // Create fork.json without forkShortName
+            var forkData = new Dictionary<string, object?>
+            {
+                ["forkName"] = "Test Fork",
+                ["forkBranch"] = "dev",
+                ["forkVersion"] = "v1.0.0"
+            };
+
+            string forkJson = JsonSerializer.Serialize(forkData);
+            string forkJsonPath = Path.Combine(tempDir, ForkJsonFileName);
+            File.WriteAllText(forkJsonPath, forkJson);
+
+            // Act
+            string? result = GetForkLabelWithShortNameFromPath(forkJsonPath);
+
+            // Assert
+            Assert.NotNull(result);
+            Assert.DoesNotContain("|", result);
+            Assert.Contains("dev", result);
+            Assert.Contains("v1.0.0", result);
+            Assert.Equal("dev \u2014 v1.0.0", result);
+        }
+        finally
+        {
+            // Cleanup
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, true);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that GetForkLabel() includes forkShortName in the full version string
+    /// when used with GetServerVersion().
+    /// </summary>
+    [Fact]
+    public void GetServerVersion_WithForkShortName_ShouldIncludeShortNameInVersion()
+    {
+        // Arrange
+        string tempDir = Path.Combine(Path.GetTempPath(), $"fork_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            // Create fork.json with forkShortName
+            var forkData = new Dictionary<string, object?>
+            {
+                ["forkName"] = "PIDOH Encrypted-Recursion Fork",
+                ["forkShortName"] = "PiDoH",
+                ["forkBranch"] = "dev",
+                ["forkVersion"] = "v15.4.0-dev3"
+            };
+
+            string forkJson = JsonSerializer.Serialize(forkData);
+            string forkJsonPath = Path.Combine(tempDir, ForkJsonFileName);
+            File.WriteAllText(forkJsonPath, forkJson);
+
+            // Simulate GetCleanVersion with a sample version
+            var version = new Version(15, 4);
+            string cleanVersion = GetCleanVersion(version);
+
+            // Get fork label with short name
+            string? forkLabel = GetForkLabelWithShortNameFromPath(forkJsonPath);
+
+            // Act - simulate GetServerVersion
+            string result = forkLabel is not null ? cleanVersion + " (" + forkLabel + ")" : cleanVersion;
+
+            // Assert - version string should contain PiDoH
+            Assert.Contains("15.4", result);
+            Assert.Contains("PiDoH", result);
+            Assert.Contains("|", result);
+        }
+        finally
+        {
+            // Cleanup
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, true);
+        }
+    }
+
+    /// <summary>
     /// Helper method that replicates GetForkLabel() logic for testing.
     /// This mirrors the implementation in DnsWebService.cs.
     /// </summary>
@@ -267,6 +404,44 @@ public class ForkVersionTests
 
             if (forkBranch is not null && forkVersion is not null)
                 return forkBranch + " \u2014 " + forkVersion;
+
+            return forkVersion ?? forkBranch;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Helper method that replicates GetForkLabel() logic WITH forkShortName support.
+    /// This mirrors the updated implementation in DnsWebService.cs.
+    /// </summary>
+    private static string? GetForkLabelWithShortNameFromPath(string forkJsonPath)
+    {
+        try
+        {
+            if (!File.Exists(forkJsonPath))
+                return null;
+
+            string json = File.ReadAllText(forkJsonPath);
+            using JsonDocument doc = JsonDocument.Parse(json);
+            JsonElement root = doc.RootElement;
+
+            string? forkBranch = root.TryGetProperty("forkBranch", out JsonElement branch) ? branch.GetString() : null;
+            string? forkVersion = root.TryGetProperty("forkVersion", out JsonElement ver) ? ver.GetString() : null;
+            string? forkShortName = root.TryGetProperty("forkShortName", out JsonElement name) ? name.GetString() : null;
+
+            if (forkBranch is null && forkVersion is null)
+                return null;
+
+            if (forkBranch is not null && forkVersion is not null)
+            {
+                if (forkShortName is not null)
+                    return forkShortName + " | " + forkBranch + " \u2014 " + forkVersion;
+
+                return forkBranch + " \u2014 " + forkVersion;
+            }
 
             return forkVersion ?? forkBranch;
         }
