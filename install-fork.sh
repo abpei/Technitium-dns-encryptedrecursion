@@ -28,57 +28,43 @@ echo "=== PIDOH Fork Installer ==="
 echo "Branch: $BRANCH"
 echo ""
 
-# Fetch latest release for the branch
+# Fetch latest release using /releases/latest endpoint
 echo "Fetching latest release..."
-if [[ "$BRANCH" == "dev" ]]; then
-    # Dev releases are tagged as v15.4.0-devN
-    RELEASE_JSON=$(curl -sf "https://api.github.com/repos/${REPO}/releases?per_page=10" | \
-        python3 -c "
-import json, sys
-releases = json.load(sys.stdin)
-for r in releases:
-    if r['tag_name'].startswith('v') and '-dev' in r['tag_name'] and not r['prerelease']:
-        print(r['tag_name'])
-        print(r['assets'][0]['browser_download_url'] if r['assets'] else '')
-        break
-else:
-    print('NONE')
-    print('')
-" 2>/dev/null)
-else
-    # Master releases are tagged as vN.N.N without -dev suffix
-    RELEASE_JSON=$(curl -sf "https://api.github.com/repos/${REPO}/releases?per_page=10" | \
-        python3 -c "
-import json, sys
-releases = json.load(sys.stdin)
-for r in releases:
-    if r['tag_name'].startswith('v') and '-dev' not in r['tag_name'] and not r['prerelease']:
-        print(r['tag_name'])
-        print(r['assets'][0]['browser_download_url'] if r['assets'] else '')
-        break
-else:
-    print('NONE')
-    print('')
-" 2>/dev/null)
-fi
+LATEST_JSON=$(curl -sf "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null || true)
+TAG=$(echo "$LATEST_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tag_name',''))" 2>/dev/null || true)
+ASSET_URL=$(echo "$LATEST_JSON" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assets=d.get('assets',[])
+print(assets[0]['browser_download_url'] if assets else '')
+" 2>/dev/null || true)
 
-TAG=$(echo "$RELEASE_JSON" | head -1)
-DOWNLOAD_URL=$(echo "$RELEASE_JSON" | tail -1)
-
-if [[ "$TAG" == "NONE" || -z "$DOWNLOAD_URL" ]]; then
-    echo "ERROR: No release found for branch '$BRANCH'"
+if [[ -z "$TAG" ]]; then
+    echo "ERROR: Could not fetch latest release from GitHub API"
     exit 1
 fi
 
+# Verify the release matches the requested branch
+if [[ "$BRANCH" == "dev" ]]; then
+    if [[ "$TAG" != *"-dev"* ]]; then
+        echo "ERROR: Latest release ($TAG) is not a dev release"
+        exit 1
+    fi
+else
+    if [[ "$TAG" == *"-dev"* ]]; then
+        echo "ERROR: Latest release ($TAG) is a dev release. No master release found."
+        exit 1
+    fi
+fi
+
 echo "Latest release: $TAG"
-echo "Download URL: $DOWNLOAD_URL"
 echo ""
 
 # Check current installed version
 if [[ -f "${INSTALL_DIR}/fork.json" ]]; then
-    CURRENT=$(cat "${INSTALL_DIR}/fork.json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('forkVersion','unknown'))" 2>/dev/null || echo "unknown")
+    CURRENT=$(python3 -c "import json; d=json.load(open('${INSTALL_DIR}/fork.json')); print(d.get('forkVersion','unknown'))" 2>/dev/null || echo "unknown")
     echo "Currently installed: $CURRENT"
-    if [[ "$CURRENT" == "$TAG" ]]; then
+    if [[ "$CURRENT" == *"$TAG"* ]] || [[ "$TAG" == *"$CURRENT"* ]]; then
         echo "Already up to date."
         exit 0
     fi
@@ -89,7 +75,12 @@ fi
 TMPDIR=$(mktemp -d)
 TARBALL="${TMPDIR}/DnsServerPortable.tar.gz"
 echo "Downloading..."
-curl -fSL -o "$TARBALL" "$DOWNLOAD_URL"
+if [[ -n "$ASSET_URL" ]]; then
+    curl -fSL -o "$TARBALL" "$ASSET_URL"
+else
+    # Fallback: construct URL from tag
+    curl -fSL -o "$TARBALL" "https://github.com/${REPO}/releases/download/${TAG}/DnsServerPortable.tar.gz"
+fi
 
 # Verify
 FILE_TYPE=$(file "$TARBALL")
@@ -129,7 +120,6 @@ sleep 2
 if systemctl is-active --quiet "$SERVICE_NAME"; then
     echo ""
     echo "=== Installation complete ==="
-    # Show version from log
     journalctl -u "$SERVICE_NAME" --since "5 seconds ago" --no-pager -o cat 2>/dev/null | grep -i "started\|version" || true
 else
     echo ""
