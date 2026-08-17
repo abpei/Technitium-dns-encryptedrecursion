@@ -187,14 +187,14 @@ else
 fi
 
 # ============================================
-# TEST 2: About page shows fork version with (dev in stats API
+# TEST 2: About page shows fork version with PiDoH label in stats API
 # ============================================
 VERSION_RESPONSE=$(curl -s "http://localhost:${WEB_PORT}/api/user/login?user=${API_USER}&pass=${API_PASS}&includeInfo=true" 2>/dev/null)
 VERSION=$(echo "$VERSION_RESPONSE" | grep -o '"version":"[^"]*"' | head -1 | cut -d'"' -f4)
-if echo "$VERSION" | grep -q "(dev"; then
-    log_test "2. Fork version contains '(dev'" "PASS" "Version: $VERSION"
+if echo "$VERSION" | grep -q "PiDoH"; then
+    log_test "2. Fork version contains 'PiDoH'" "PASS" "Version: $VERSION"
 else
-    log_test "2. Fork version contains '(dev'" "FAIL" "Version: $VERSION"
+    log_test "2. Fork version contains 'PiDoH'" "FAIL" "Version: $VERSION"
 fi
 
 # ============================================
