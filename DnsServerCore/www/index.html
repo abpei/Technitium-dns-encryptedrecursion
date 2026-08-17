@@ -1832,13 +1832,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                                                                     </label>
                                                                     <div style="padding-top: 5px; padding-left: 20px;">Select this option to specify networks that must be allowed or denied recursion.</div>
                                                                 </div>
-                                                                <div class="radio">
-                                                                    <label>
-                                                                        <input type="radio" name="rdRecursion" id="rdRecursionAllowOnlyForOptionalProtocols" value="AllowOnlyForOptionalProtocols">
-                                                                        Allow Recursion Only For Encrypted Protocols (DoH, DoT, DoQ)
-                                                                    </label>
-                                                                    <div style="padding-top: 5px; padding-left: 20px;">Select this option to allow recursion only via DNS-over-HTTPS, DNS-over-TLS, and DNS-over-QUIC. Recursion via plain DNS (UDP/TCP port 53) will be denied to prevent DNS amplification attacks. Authoritative zones still respond on all protocols.</div>
-                                                                </div>
                                                             </div>
                                                             <div class="col-sm-offset-3 col-sm-6">
                                                                 <label for="txtRecursionNetworkACL" class="control-label">Network Access Control List (ACL)</label>
