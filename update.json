@@ -1,7 +1,7 @@
 {
-    "updateVersion": "15.4.0.4",
-    "updateTitle": "Fork Update v15.4.0-dev4 Available!",
-    "updateMessage": "A new version of the encrypted-recursion fork is available. This adds the PiDoH project name to the version label and exempts localhost from encrypted-only recursion.",
-    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-dev4",
-    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-dev4"
+    "updateVersion": "15.4.0.5",
+    "updateTitle": "Fork Update v15.4.0-dev5 Available!",
+    "updateMessage": "A new version of the encrypted-recursion fork is available. All 38 unit tests and 11 integration tests pass.",
+    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-dev5",
+    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-dev5"
 }
