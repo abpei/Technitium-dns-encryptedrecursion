@@ -1399,10 +1399,6 @@ function loadDnsSettings(responseJSON) {
             $("#txtRecursionNetworkACL").prop("disabled", false);
             break;
 
-        case "AllowOnlyForOptionalProtocols":
-            $("#rdRecursionAllowOnlyForOptionalProtocols").prop("checked", true);
-            break;
-
         case "Deny":
         default:
             $("#rdRecursionDeny").prop("checked", true);
