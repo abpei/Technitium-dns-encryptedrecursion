@@ -1,7 +1,7 @@
 {
-    "updateVersion": "15.4.0.6",
-    "updateTitle": "Fork Update v15.4.0-dev6 Available!",
-    "updateMessage": "A new version of the encrypted-recursion fork is available. Install script fix.",
-    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-dev6",
-    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-dev6"
+    "updateVersion": "15.4.0.7",
+    "updateTitle": "Fork Update v15.4.0-dev7 Available!",
+    "updateMessage": "A new version of the encrypted-recursion fork is available. Removed encrypted-only recursion feature to eliminate UDP port 53 amplification exposure.",
+    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-dev7",
+    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-dev7"
 }
