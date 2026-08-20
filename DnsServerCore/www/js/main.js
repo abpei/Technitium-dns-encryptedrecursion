@@ -181,6 +181,11 @@ function showPageMain() {
             $("#mainPanelTabPaneLogs").addClass("active");
             refreshLogsTab();
         }
+        else if (sessionData.info.permissions.Settings.canView) {
+            $("#mainPanelTabListBlockLists").addClass("active");
+            $("#mainPanelTabPaneBlockLists").addClass("active");
+            refreshBlockLists();
+        }
         else {
             $("#mainPanelTabListAbout").addClass("active");
             $("#mainPanelTabPaneAbout").addClass("active");
@@ -258,6 +263,13 @@ function showPageMain() {
     }
     else {
         $("#mainPanelTabListLogs").hide();
+    }
+
+    if (sessionData.info.permissions.Settings.canView) {
+        $("#mainPanelTabListBlockLists").show();
+    }
+    else {
+        $("#mainPanelTabListBlockLists").hide();
     }
 
     $("#pageMain").show();
@@ -694,6 +706,9 @@ function showAbout() {
 
         $("#mainPanelTabListLogs").removeClass("active");
         $("#mainPanelTabPaneLogs").removeClass("active");
+
+        $("#mainPanelTabListBlockLists").removeClass("active");
+        $("#mainPanelTabPaneBlockLists").removeClass("active");
 
         $("#mainPanelTabListAbout").addClass("active");
         $("#mainPanelTabPaneAbout").addClass("active");
