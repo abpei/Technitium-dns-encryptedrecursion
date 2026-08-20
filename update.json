@@ -1,7 +1,7 @@
 {
-    "updateVersion": "15.4.0.9",
-    "updateTitle": "PiDoH Fork v15.4.0-dev9 Available!",
-    "updateMessage": "A new version of the encrypted-recursion fork is available. This fixes the domain checker in the Block List Management Tab.",
-    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-dev9",
-    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-dev9"
+    "updateVersion": "15.4.0.10",
+    "updateTitle": "PiDoH Fork v15.4.0-dev10 Available!",
+    "updateMessage": "A new version of the encrypted-recursion fork is available. Block list domain counts now formatted with commas. Domain checker supports URL input.",
+    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-dev10",
+    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-dev10"
 }
