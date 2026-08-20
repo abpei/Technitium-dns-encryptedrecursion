@@ -26,6 +26,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Linq;
 using TechnitiumLibrary;
 using TechnitiumLibrary.IO;
 using TechnitiumLibrary.Net;
@@ -36,6 +37,33 @@ using TechnitiumLibrary.Net.Http.Client;
 
 namespace DnsServerCore.Dns.ZoneManagers
 {
+    public sealed class BlockListUrlStatus
+    {
+        public string Url { get; set; }
+        public string Type { get; set; }
+        public int DomainCount { get; set; }
+        public DateTime LastUpdatedOn { get; set; }
+        public string LastUpdateStatus { get; set; }
+        public string LastErrorMessage { get; set; }
+    }
+
+    public sealed class BlockListDomainCheckResult
+    {
+        public string Domain { get; set; }
+        public bool IsBlocked { get; set; }
+        public string BlockedDomain { get; set; }
+        public IReadOnlyList<string> BlockListUrls { get; set; }
+        public bool IsAllowed { get; set; }
+        public string AllowedDomain { get; set; }
+    }
+
+    public sealed class BlockListAllowCheckResult
+    {
+        public string Domain { get; set; }
+        public bool IsAllowed { get; set; }
+        public string AllowedDomain { get; set; }
+    }
+
     public sealed class BlockListZoneManager : IDisposable
     {
         #region variables
@@ -45,6 +73,9 @@ namespace DnsServerCore.Dns.ZoneManagers
 
         readonly DnsServer _dnsServer;
         readonly string _localCacheFolder;
+
+        List<BlockListUrlStatus> _blockListUrlStatuses = new List<BlockListUrlStatus>();
+        Dictionary<string, (string status, string error)> _lastDownloadStatus = new();
 
         IReadOnlyList<string> _blockListUrls = [];
 
@@ -562,6 +593,8 @@ namespace DnsServerCore.Dns.ZoneManagers
             bool downloaded = false;
             bool notModified = false;
 
+            var downloadStatuses = new System.Collections.Concurrent.ConcurrentDictionary<string, (string status, string error)>();
+
             async Task DownloadListUrlAsync(Uri listUrl, bool isAllowList)
             {
                 try
@@ -578,6 +611,7 @@ namespace DnsServerCore.Dns.ZoneManagers
                             {
                                 notModified = true;
                                 _dnsServer.LogManager.Write("DNS Server successfully checked for a new update of the " + (isAllowList ? "allow" : "block") + " list: " + listUrl.AbsoluteUri);
+                                downloadStatuses.TryAdd(listUrl.AbsoluteUri, ("notModified", null));
                                 return;
                             }
                         }
@@ -586,6 +620,7 @@ namespace DnsServerCore.Dns.ZoneManagers
 
                         downloaded = true;
                         _dnsServer.LogManager.Write("DNS Server successfully downloaded " + (isAllowList ? "allow" : "block") + " list (" + WebUtilities.GetFormattedSize(new FileInfo(listFilePath).Length) + "): " + listUrl.AbsoluteUri);
+                        downloadStatuses.TryAdd(listUrl.AbsoluteUri, ("success", null));
                     }
                     else
                     {
@@ -624,6 +659,7 @@ namespace DnsServerCore.Dns.ZoneManagers
 
                                         downloaded = true;
                                         _dnsServer.LogManager.Write("DNS Server successfully downloaded " + (isAllowList ? "allow" : "block") + " list (" + WebUtilities.GetFormattedSize(new FileInfo(listFilePath).Length) + "): " + listUrl.AbsoluteUri);
+                                        downloadStatuses.TryAdd(listUrl.AbsoluteUri, ("success", null));
                                     }
                                     break;
 
@@ -631,6 +667,7 @@ namespace DnsServerCore.Dns.ZoneManagers
                                     {
                                         notModified = true;
                                         _dnsServer.LogManager.Write("DNS Server successfully checked for a new update of the " + (isAllowList ? "allow" : "block") + " list: " + listUrl.AbsoluteUri);
+                                        downloadStatuses.TryAdd(listUrl.AbsoluteUri, ("notModified", null));
                                     }
                                     break;
 
@@ -643,6 +680,7 @@ namespace DnsServerCore.Dns.ZoneManagers
                 catch (Exception ex)
                 {
                     _dnsServer.LogManager.Write("DNS Server failed to download " + (isAllowList ? "allow" : "block") + " list and will use previously downloaded file (if available): " + listUrl.AbsoluteUri, ex);
+                    downloadStatuses.TryAdd(listUrl.AbsoluteUri, ("failed", ex.Message));
                 }
             }
 
@@ -663,6 +701,8 @@ namespace DnsServerCore.Dns.ZoneManagers
 
             if (downloaded || forceReload)
             {
+                _lastDownloadStatus = new Dictionary<string, (string, string)>(downloadStatuses);
+
                 LoadBlockLists();
 
                 //force GC collection to remove old zone data from memory quickly
@@ -795,6 +835,48 @@ namespace DnsServerCore.Dns.ZoneManagers
             }
 
             //load block list zone
+
+            //build per-URL status list (capture counts before queues are consumed)
+            List<BlockListUrlStatus> urlStatusList = new List<BlockListUrlStatus>(_blockListUrls.Count);
+
+            foreach (string listUri in _blockListUrls)
+            {
+                if (listUri.TrimStart().StartsWith('#'))
+                    continue;
+
+                bool isAllowList = listUri.StartsWith('!');
+                Uri uri = isAllowList ? new Uri(listUri.Substring(1)) : new Uri(listUri);
+
+                string status = "ok";
+                string error = null;
+                if (_lastDownloadStatus.TryGetValue(uri.AbsoluteUri, out var dlResult))
+                {
+                    status = dlResult.status;
+                    error = dlResult.error;
+                }
+
+                DateTime lastUpdated = DateTime.MinValue;
+                string listFilePath = GetBlockListFilePath(uri);
+                if (File.Exists(listFilePath))
+                    lastUpdated = File.GetLastWriteTimeUtc(listFilePath);
+
+                int domainCount = 0;
+                if (isAllowList && allowListQueues.TryGetValue(uri, out var aq))
+                    domainCount = aq.Count;
+                else if (!isAllowList && blockListQueues.TryGetValue(uri, out var bq))
+                    domainCount = bq.Count;
+
+                urlStatusList.Add(new BlockListUrlStatus
+                {
+                    Url = uri.AbsoluteUri,
+                    Type = isAllowList ? "allow" : "block",
+                    DomainCount = domainCount,
+                    LastUpdatedOn = lastUpdated,
+                    LastUpdateStatus = status,
+                    LastErrorMessage = error
+                });
+            }
+
             Dictionary<string, object> allowListZone = new Dictionary<string, object>(totalAllowedDomains);
 
             foreach (KeyValuePair<Uri, Queue<string>> allowListQueue in allowListQueues)
@@ -832,6 +914,7 @@ namespace DnsServerCore.Dns.ZoneManagers
             //set new allowed and blocked zones
             _allowListZone = allowListZone;
             _blockListZone = blockListZone;
+            _blockListUrlStatuses = urlStatusList;
 
             _dnsServer.LogManager.Write("DNS Server block list zone was loaded successfully.");
         }
@@ -977,6 +1060,73 @@ namespace DnsServerCore.Dns.ZoneManagers
             ForceUpdateBlockLists(false);
         }
 
+        public BlockListDomainCheckResult CheckDomain(string domain)
+        {
+            domain = domain.ToLowerInvariant().Trim('.');
+
+            List<Uri> blockLists = IsZoneBlocked(domain, out string blockedDomain);
+
+            bool isAllowed = false;
+            string allowedDomain = null;
+
+            if (blockLists is null && _allowListZone.Count > 0)
+            {
+                string d = domain;
+                do
+                {
+                    if (_allowListZone.TryGetValue(d, out _))
+                    {
+                        isAllowed = true;
+                        allowedDomain = d;
+                        break;
+                    }
+                    d = AuthZoneManager.GetParentZone(d);
+                }
+                while (d is not null);
+            }
+
+            return new BlockListDomainCheckResult
+            {
+                Domain = domain,
+                IsBlocked = blockLists is not null,
+                BlockedDomain = blockedDomain,
+                BlockListUrls = blockLists?.Select(u => u.AbsoluteUri).ToList() ?? new List<string>(),
+                IsAllowed = isAllowed,
+                AllowedDomain = allowedDomain
+            };
+        }
+
+        public BlockListAllowCheckResult CheckAllowList(string domain)
+        {
+            domain = domain.ToLowerInvariant().Trim('.');
+
+            bool isAllowed = false;
+            string allowedDomain = null;
+
+            if (_allowListZone.Count > 0)
+            {
+                string d = domain;
+                do
+                {
+                    if (_allowListZone.TryGetValue(d, out _))
+                    {
+                        isAllowed = true;
+                        allowedDomain = d;
+                        break;
+                    }
+                    d = AuthZoneManager.GetParentZone(d);
+                }
+                while (d is not null);
+            }
+
+            return new BlockListAllowCheckResult
+            {
+                Domain = domain,
+                IsAllowed = isAllowed,
+                AllowedDomain = allowedDomain
+            };
+        }
+
         public void TemporaryDisableBlocking(int minutes, IPEndPoint userEP, string username)
         {
             Timer temporaryDisableBlockingTimer = _temporaryDisableBlockingTimer;
@@ -1113,6 +1263,9 @@ namespace DnsServerCore.Dns.ZoneManagers
 
         public int TotalZonesBlocked
         { get { return _blockListZone.Count; } }
+
+        public IReadOnlyList<BlockListUrlStatus> BlockListUrlStatuses
+        { get { return _blockListUrlStatuses; } }
 
         #endregion
     }

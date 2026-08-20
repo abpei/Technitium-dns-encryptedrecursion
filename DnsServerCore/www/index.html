@@ -51,6 +51,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
     <script src="js/dnsclient.js"></script>
     <script src="js/dhcp.js"></script>
     <script src="js/logs.js"></script>
+    <script src="js/blocklist.js"></script>
 </head>
 <body>
     <div id="header">
@@ -156,6 +157,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                                 <li id="mainPanelTabListDhcp" role="presentation"><a href="#mainPanelTabPaneDhcp" aria-controls="mainPanelTabPaneDhcp" role="tab" data-toggle="tab" onclick="refreshDhcpTab();">DHCP</a></li>
                                 <li id="mainPanelTabListAdmin" role="presentation"><a href="#mainPanelTabPaneAdmin" aria-controls="mainPanelTabPaneAdmin" role="tab" data-toggle="tab" onclick="refreshAdminTab();">Administration</a></li>
                                 <li id="mainPanelTabListLogs" role="presentation"><a href="#mainPanelTabPaneLogs" aria-controls="mainPanelTabPaneLogs" role="tab" data-toggle="tab" onclick="refreshLogsTab();">Logs</a></li>
+                                <li id="mainPanelTabListBlockLists" role="presentation"><a href="#mainPanelTabPaneBlockLists" aria-controls="mainPanelTabPaneBlockLists" role="tab" data-toggle="tab" onclick="refreshBlockLists();">Block Lists</a></li>
                                 <li id="mainPanelTabListAbout" role="presentation"><a href="#mainPanelTabPaneAbout" aria-controls="mainPanelTabPaneAbout" role="tab" data-toggle="tab">About</a></li>
                             </ul>
 
@@ -3485,8 +3487,114 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
                                 </div>
 
-                                <div id="mainPanelTabPaneAbout" role="tabpanel" class="tab-pane" style="padding: 40px 0 20px 0;">
+                                <div id="mainPanelTabPaneBlockLists" role="tabpanel" class="tab-pane" style="padding: 10px 0 0 0;">
 
+                                    <div>
+                                        <div class="pull-right">
+                                            <select id="optBlockListsClusterNode" class="form-control pull-right cluster-node-dropdown" style="margin-left: 0px;" onchange="refreshBlockLists();"></select>
+                                        </div>
+                                        <div class="clearfix"></div>
+                                    </div>
+
+                                    <div id="divBlockListsLoader" style="margin-top: 10px; height: 400px;"></div>
+
+                                    <div id="divBlockLists" style="display: none; margin-top: 10px;">
+
+                                        <!-- Summary Section -->
+                                        <div class="row" style="margin-bottom: 20px;">
+                                            <div class="col-md-3">
+                                                <div class="panel panel-default">
+                                                    <div class="panel-heading"><b>Total Blocked Domains</b></div>
+                                                    <div class="panel-body">
+                                                        <h2 id="lblBlockListsTotalBlocked">0</h2>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="panel panel-default">
+                                                    <div class="panel-heading"><b>Total Allowed Domains</b></div>
+                                                    <div class="panel-body">
+                                                        <h2 id="lblBlockListsTotalAllowed">0</h2>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="panel panel-default">
+                                                    <div class="panel-heading"><b>Last Updated</b></div>
+                                                    <div class="panel-body">
+                                                        <span id="lblBlockListsLastUpdated">-</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="panel panel-default">
+                                                    <div class="panel-heading"><b>Next Update</b></div>
+                                                    <div class="panel-body">
+                                                        <span id="lblBlockListsNextUpdated">-</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Domain Checker Section -->
+                                        <div class="panel panel-default" style="margin-bottom: 20px;">
+                                            <div class="panel-heading"><b>Domain Checker</b></div>
+                                            <div class="panel-body">
+                                                <div class="input-group" style="max-width: 500px;">
+                                                    <input type="text" id="txtBlockListDomainChecker" class="form-control" placeholder="Enter domain to check (e.g. example.com)" />
+                                                    <span class="input-group-btn">
+                                                        <button id="btnBlockListCheckDomain" type="button" class="btn btn-primary" data-loading-text="Checking..." onclick="checkBlockListDomain();">Check</button>
+                                                    </span>
+                                                </div>
+                                                <div id="divBlockListCheckResult" style="margin-top: 10px;"></div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Block Lists Table -->
+                                        <h4>Block Lists</h4>
+                                        <table class="table table-hover" style="margin-bottom: 20px;">
+                                            <thead>
+                                                <tr>
+                                                    <th>URL</th>
+                                                    <th>Type</th>
+                                                    <th>Domains</th>
+                                                    <th>Last Updated</th>
+                                                    <th>Status</th>
+                                                    <th>Error</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="tableBlockListsBody">
+                                            </tbody>
+                                            <tfoot id="tableBlockListsFooter">
+                                                <tr><td colspan="6" align="center">No Block Lists Found</td></tr>
+                                            </tfoot>
+                                        </table>
+
+                                        <!-- Allow Lists Table -->
+                                        <h4>Allow Lists</h4>
+                                        <table class="table table-hover">
+                                            <thead>
+                                                <tr>
+                                                    <th>URL</th>
+                                                    <th>Type</th>
+                                                    <th>Domains</th>
+                                                    <th>Last Updated</th>
+                                                    <th>Status</th>
+                                                    <th>Error</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="tableAllowListsBody">
+                                            </tbody>
+                                            <tfoot id="tableAllowListsFooter">
+                                                <tr><td colspan="6" align="center">No Allow Lists Found</td></tr>
+                                            </tfoot>
+                                        </table>
+
+                                    </div>
+
+                                </div>
+
+                                <div id="mainPanelTabPaneAbout" role="tabpanel" class="tab-pane" style="padding: 40px 0 20px 0;">
                                     <div class="about" style="text-align: center;">
                                         <img src="img/logo.png" alt="Technitium Logo" />
                                         <h1>Technitium DNS Server</h1>
