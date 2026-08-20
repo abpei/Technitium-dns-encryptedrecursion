@@ -1021,6 +1021,7 @@ function updateAllClusterNodeDropDowns() {
     updateClusterNodeDropDown($("#optAdminSessionsClusterNode"));
     updateClusterNodeDropDown($("#optAdminClusterNode"));
     updateClusterNodeDropDown($("#optLogsClusterNode"));
+    updateClusterNodeDropDown($("#optBlockListsClusterNode"), true, localStorage.getItem("blockListsClusterNode"));
 }
 
 function updateClusterNodeDropDown(optClusterNode, addClusterNode, selectedNode) {
