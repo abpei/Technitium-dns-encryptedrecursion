@@ -135,6 +135,8 @@ namespace DnsServerCore
                 if (string.IsNullOrEmpty(domain))
                     throw new DnsWebServiceException("The 'domain' parameter is required.");
 
+                domain = DnsUtils.NormalizeDomainInput(domain);
+
                 if (DnsClient.IsDomainNameUnicode(domain))
                     domain = DnsClient.ConvertDomainNameToAscii(domain);
 

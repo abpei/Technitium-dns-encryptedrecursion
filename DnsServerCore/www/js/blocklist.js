@@ -35,8 +35,8 @@ function refreshBlockLists() {
             var allowLists = responseJSON.response.allowLists;
 
             // summary
-            $("#lblBlockListsTotalBlocked").text(responseJSON.response.totalBlockedDomains);
-            $("#lblBlockListsTotalAllowed").text(responseJSON.response.totalAllowedDomains);
+            $("#lblBlockListsTotalBlocked").text(responseJSON.response.totalBlockedDomains.toLocaleString());
+            $("#lblBlockListsTotalAllowed").text(responseJSON.response.totalAllowedDomains.toLocaleString());
 
             if (responseJSON.response.blockListLastUpdatedOn)
                 $("#lblBlockListsLastUpdated").text(moment(responseJSON.response.blockListLastUpdatedOn).local().format("YYYY-MM-DD HH:mm"));
@@ -53,7 +53,7 @@ function refreshBlockLists() {
             for (var i = 0; i < blockLists.length; i++) {
                 blockListHtmlRows += "<tr><td>" + htmlEncode(blockLists[i].url) + "</td><td>" +
                     htmlEncode(blockLists[i].type) + "</td><td>" +
-                    blockLists[i].domainCount + "</td><td>" +
+                    blockLists[i].domainCount.toLocaleString() + "</td><td>" +
                     (blockLists[i].lastUpdatedOn ? moment(blockLists[i].lastUpdatedOn).local().format("YYYY-MM-DD HH:mm") : "-") + "</td><td>" +
                     formatBlockListStatus(blockLists[i].lastUpdateStatus) + "</td><td>" +
                     (blockLists[i].lastErrorMessage ? htmlEncode(blockLists[i].lastErrorMessage) : "-") + "</td></tr>";
@@ -71,7 +71,7 @@ function refreshBlockLists() {
             for (var i = 0; i < allowLists.length; i++) {
                 allowListHtmlRows += "<tr><td>" + htmlEncode(allowLists[i].url) + "</td><td>" +
                     htmlEncode(allowLists[i].type) + "</td><td>" +
-                    allowLists[i].domainCount + "</td><td>" +
+                    allowLists[i].domainCount.toLocaleString() + "</td><td>" +
                     (allowLists[i].lastUpdatedOn ? moment(allowLists[i].lastUpdatedOn).local().format("YYYY-MM-DD HH:mm") : "-") + "</td><td>" +
                     formatBlockListStatus(allowLists[i].lastUpdateStatus) + "</td><td>" +
                     (allowLists[i].lastErrorMessage ? htmlEncode(allowLists[i].lastErrorMessage) : "-") + "</td></tr>";
