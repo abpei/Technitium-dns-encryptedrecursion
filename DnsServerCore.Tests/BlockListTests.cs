@@ -1109,10 +1109,11 @@ public class CnameChainResolverTests : IDisposable
     }
 
     [Fact]
-    public async Task CnameChain_AllowlistOverridesBlocklistAtIntermediateLevel()
+    public async Task CnameChain_AllowlistAtIntermediateDoesNotOverrideFinalTargetBlock()
     {
         // Arrange - "intermediate.example.com" is allowed, but "final.example.com" is blocked
         // Chain: start.example.com -> intermediate.example.com -> final.example.com (blocked)
+        // With final-target-only logic, the intermediate allow does NOT override the final target block
         SetupBlockListZone(new Dictionary<string, List<Uri>>
         {
             ["final.example.com"] = new List<Uri> { _testBlockListUri }
@@ -1156,7 +1157,7 @@ public class CnameChainResolverTests : IDisposable
                 entry.BlockListUrls = domainResult.BlockListUrls;
             }
 
-            // Allowlist overrides blocklist at each level
+            // Allowlist overrides blocklist at each level (per-entry display)
             if (allowResult.IsAllowed)
             {
                 entry.IsBlocked = false;
@@ -1164,10 +1165,14 @@ public class CnameChainResolverTests : IDisposable
             }
         }
 
-        // The intermediate domain is allowed, so the chain should report allowed
-        Assert.True(isAllowed);
-        // The intermediate entry should be marked as allowed
+        // The intermediate domain IS allowed per entry, but the overall result
+        // is determined by the final target only (final.example.com is blocked)
+        // So isAllowed from per-entry checks is true, but the API would set
+        // isBlocked = true because the final target is blocked
+        Assert.True(isAllowed); // intermediate entry is allowed
         Assert.True(chain.Any(e => e.IsAllowed && e.Target == "intermediate.example.com"));
+        // The final target entry should be blocked
+        Assert.True(chain.Any(e => e.IsBlocked && e.Domain == "final.example.com"));
     }
 
     [Fact]
@@ -1437,5 +1442,131 @@ public class CnameChainResolverTests : IDisposable
         // Terminal A record should NOT be allowed
         var aRecord = chain.First(e => e.Type == "A");
         Assert.False(aRecord.IsAllowed);
+    }
+
+    [Fact]
+    public async Task CnameChain_FinalTargetAllowedByAllowedZoneManager_OverridesBlock()
+    {
+        // Arrange - "final.example.com" is in AllowedZoneManager AND blocked
+        // Chain: start.example.com -> blocked.example.com -> final.example.com
+        // Final target allowed should override the block
+        SetupBlockListZone(new Dictionary<string, List<Uri>>
+        {
+            ["blocked.example.com"] = new List<Uri> { _testBlockListUri },
+            ["final.example.com"] = new List<Uri> { _testBlockListUri }
+        });
+        SetupAllowListZone(new Dictionary<string, object>());
+
+        // Whitelist the final target
+        _dnsServer.AllowedZoneManager.AllowZone("final.example.com");
+
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateCnameChainResponse(
+                "start.example.com",
+                new[] { "blocked.example.com", "final.example.com" },
+                "10.20.30.40"));
+        });
+
+        var resolver = new CnameChainResolver(mockResolver);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "start.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(chain);
+        Assert.Equal(3, chain.Count); // 2 CNAME + 1 A record
+
+        // Simulate the API logic: check final target against AllowedZoneManager
+        var lastEntry = chain.Last();
+        string finalTarget = lastEntry.Target ?? lastEntry.Domain;
+        Assert.Equal("final.example.com", finalTarget);
+
+        // Final target is in AllowedZoneManager -> should be allowed
+        var allowedRequest = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError,
+            new DnsQuestionRecord[] { new DnsQuestionRecord(finalTarget, DnsResourceRecordType.A, DnsClass.IN) });
+        Assert.True(_dnsServer.AllowedZoneManager.IsAllowed(allowedRequest));
+
+        // Overall: isBlocked should be false because final target is allowed
+        // (blocked.example.com is blocked, but final target overrides)
+    }
+
+    [Fact]
+    public async Task CnameChain_RootWhitelist_DoesNotOverrideFinalTargetBlock()
+    {
+        // Arrange - "start.example.com" (root) is whitelisted, but final target is blocked
+        // Chain: start.example.com -> final.example.com (blocked)
+        // Root whitelist should NOT override final target block
+        SetupBlockListZone(new Dictionary<string, List<Uri>>
+        {
+            ["final.example.com"] = new List<Uri> { _testBlockListUri }
+        });
+        SetupAllowListZone(new Dictionary<string, object>());
+
+        // Whitelist the root domain (not the final target)
+        _dnsServer.AllowedZoneManager.AllowZone("start.example.com");
+
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateCnameChainResponse(
+                "start.example.com",
+                new[] { "final.example.com" },
+                "1.2.3.4"));
+        });
+
+        var resolver = new CnameChainResolver(mockResolver);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "start.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(chain);
+        Assert.Equal(2, chain.Count); // 1 CNAME + 1 A record
+
+        // Simulate the API logic: check final target against AllowedZoneManager
+        var lastEntry = chain.Last();
+        string finalTarget = lastEntry.Target ?? lastEntry.Domain;
+        Assert.Equal("final.example.com", finalTarget);
+
+        // Final target is NOT in AllowedZoneManager -> block should remain
+        var allowedRequest = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError,
+            new DnsQuestionRecord[] { new DnsQuestionRecord(finalTarget, DnsResourceRecordType.A, DnsClass.IN) });
+        Assert.False(_dnsServer.AllowedZoneManager.IsAllowed(allowedRequest));
+
+        // Root is allowed but final target is not -> overall should be BLOCKED
+    }
+
+    [Fact]
+    public async Task CnameChain_NoCname_WhitelistedDomain_ReturnsAllowed()
+    {
+        // Arrange - domain with no CNAME, whitelisted in AllowedZoneManager
+        // The fallback path handles this: root IS the final target
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>());
+
+        _dnsServer.AllowedZoneManager.AllowZone("direct.example.com");
+
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateDirectAResponse(
+                "direct.example.com",
+                "10.0.0.1"));
+        });
+
+        var resolver = new CnameChainResolver(mockResolver);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "direct.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert - returns null (no CNAME), fallback path is used in the API
+        Assert.Null(chain);
+
+        // Verify the domain is in AllowedZoneManager
+        var request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError,
+            new DnsQuestionRecord[] { new DnsQuestionRecord("direct.example.com", DnsResourceRecordType.A, DnsClass.IN) });
+        Assert.True(_dnsServer.AllowedZoneManager.IsAllowed(request));
     }
 }

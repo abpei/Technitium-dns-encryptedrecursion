@@ -307,35 +307,9 @@ namespace DnsServerCore
                 string allowedBy = null;
                 AllowedZoneManager allowedZoneManager = _dnsWebService._dnsServer.AllowedZoneManager;
 
-                // Check the original input domain against AllowedZoneManager
-                if (allowedZoneManager is not null)
-                {
-                    DnsDatagram originalRequest = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord(domain, DnsResourceRecordType.A, DnsClass.IN) });
-
-                    if (allowedZoneManager.IsAllowed(originalRequest))
-                    {
-                        allowedBy = "allowed-zone";
-                        isAllowed = true;
-                        matchedAllowedDomain = domain;
-                    }
-                }
-
                 foreach (CnameChainEntry entry in chain)
                 {
                     string checkDomain = entry.Target ?? entry.Domain;
-
-                    // Check allowed-zone first (mirrors DNS pipeline)
-                    if (allowedBy is null && allowedZoneManager is not null)
-                    {
-                        DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord(checkDomain, DnsResourceRecordType.A, DnsClass.IN) });
-
-                        if (allowedZoneManager.IsAllowed(request))
-                        {
-                            allowedBy = "allowed-zone";
-                            isAllowed = true;
-                            matchedAllowedDomain = checkDomain;
-                        }
-                    }
 
                     BlockListDomainCheckResult domainResult = manager.CheckDomain(checkDomain);
                     BlockListAllowCheckResult allowResult = manager.CheckAllowList(checkDomain);
@@ -369,7 +343,29 @@ namespace DnsServerCore
                     }
                 }
 
+                // Determine the final target domain in the chain (last entry's Target or Domain)
+                CnameChainEntry lastEntry = chain[chain.Count - 1];
+                string finalTargetDomain = lastEntry.Target ?? lastEntry.Domain;
+
+                // Check the final target against AllowedZoneManager
+                // Allow/block determination happens at the final target only
+                if (allowedZoneManager is not null)
+                {
+                    DnsDatagram finalRequest = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord(finalTargetDomain, DnsResourceRecordType.A, DnsClass.IN) });
+
+                    if (allowedZoneManager.IsAllowed(finalRequest))
+                    {
+                        allowedBy = "allowed-zone";
+                        isAllowed = true;
+                        matchedAllowedDomain = finalTargetDomain;
+                    }
+                }
+
                 bool isBlocked = overallBlockedDomain is not null;
+
+                // Final target allowed overrides block
+                if (isAllowed && allowedBy == "allowed-zone")
+                    isBlocked = false;
 
                 // Write the JSON response
                 jsonWriter.WriteString("domain", domain);
