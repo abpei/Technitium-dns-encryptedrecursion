@@ -1071,7 +1071,7 @@ namespace DnsServerCore.Dns.ZoneManagers
             ForceUpdateBlockLists(false);
         }
 
-        public BlockListDomainCheckResult CheckDomain(string domain)
+        public BlockListDomainCheckResult CheckDomain(string domain, AllowedZoneManager allowedZoneManager = null)
         {
             domain = domain.ToLowerInvariant().Trim('.');
 
@@ -1080,6 +1080,7 @@ namespace DnsServerCore.Dns.ZoneManagers
             bool isAllowed = false;
             string allowedDomain = null;
 
+            //Check blocklist allowlist (lines starting with !)
             if (blockLists is null && _allowListZone.Count > 0)
             {
                 string d = domain;
@@ -1096,6 +1097,18 @@ namespace DnsServerCore.Dns.ZoneManagers
                 while (d is not null);
             }
 
+            //Also check manually added allowed zones via AllowedZoneManager when available
+            if (!isAllowed && allowedZoneManager is not null)
+            {
+                DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord(domain, DnsResourceRecordType.A, DnsClass.IN) });
+
+                if (allowedZoneManager.IsAllowed(request))
+                {
+                    isAllowed = true;
+                    allowedDomain = domain;
+                }
+            }
+
             return new BlockListDomainCheckResult
             {
                 Domain = domain,
@@ -1107,13 +1120,14 @@ namespace DnsServerCore.Dns.ZoneManagers
             };
         }
 
-        public BlockListAllowCheckResult CheckAllowList(string domain)
+        public BlockListAllowCheckResult CheckAllowList(string domain, AllowedZoneManager allowedZoneManager = null)
         {
             domain = domain.ToLowerInvariant().Trim('.');
 
             bool isAllowed = false;
             string allowedDomain = null;
 
+            //Check blocklist allowlist (lines starting with !)
             if (_allowListZone.Count > 0)
             {
                 string d = domain;
@@ -1128,6 +1142,18 @@ namespace DnsServerCore.Dns.ZoneManagers
                     d = AuthZoneManager.GetParentZone(d);
                 }
                 while (d is not null);
+            }
+
+            //Also check manually added allowed zones via AllowedZoneManager when available
+            if (!isAllowed && allowedZoneManager is not null)
+            {
+                DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord(domain, DnsResourceRecordType.A, DnsClass.IN) });
+
+                if (allowedZoneManager.IsAllowed(request))
+                {
+                    isAllowed = true;
+                    allowedDomain = domain;
+                }
             }
 
             return new BlockListAllowCheckResult
