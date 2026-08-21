@@ -37,16 +37,34 @@ ALL_JSON=$(curl -sf "https://api.github.com/repos/${REPO}/releases?per_page=20" 
 RELEASE=$(echo "$ALL_JSON" | python3 -c "
 import json,sys
 releases=json.load(sys.stdin)
-for r in releases:
-    t=r.get('tag_name','')
-    if '${BRANCH}' == 'dev' and '-dev' in t:
-        a=r.get('assets',[])
-        print(json.dumps({'tag':t,'url':a[0]['browser_download_url'] if a else ''}))
-        break
-    elif '${BRANCH}' == 'master' and '-dev' not in t:
-        a=r.get('assets',[])
-        print(json.dumps({'tag':t,'url':a[0]['browser_download_url'] if a else ''}))
-        break
+if '${BRANCH}' == 'dev':
+    # Prefer new-format tags (-pidoh-dev), then old-format (-dev)
+    for tag_pattern in ['-pidoh-dev', '-dev']:
+        for r in releases:
+            t=r.get('tag_name','')
+            if tag_pattern in t:
+                a=r.get('assets',[])
+                print(json.dumps({'tag':t,'url':a[0]['browser_download_url'] if a else ''}))
+                sys.exit(0)
+else:
+    # Prefer new-format tags (-pidoh.), then old-format (no -dev)
+    for tag_pattern in ['-pidoh.', '-dev']:
+        for r in releases:
+            t=r.get('tag_name','')
+            if tag_pattern == '-dev' and '-dev' in t:
+                continue
+            if tag_pattern == '-pidoh.' and '-pidoh.' in t:
+                a=r.get('assets',[])
+                print(json.dumps({'tag':t,'url':a[0]['browser_download_url'] if a else ''}))
+                sys.exit(0)
+        if tag_pattern == '-pidoh.':
+            # Fallback: any tag without -dev
+            for r in releases:
+                t=r.get('tag_name','')
+                if '-dev' not in t:
+                    a=r.get('assets',[])
+                    print(json.dumps({'tag':t,'url':a[0]['browser_download_url'] if a else ''}))
+                    sys.exit(0)
 " 2>/dev/null || true)
 TAG=$(echo "$RELEASE" | python3 -c "import json,sys; print(json.load(sys.stdin)['tag'])" 2>/dev/null || true)
 ASSET_URL=$(echo "$RELEASE" | python3 -c "import json,sys; print(json.load(sys.stdin)['url'])" 2>/dev/null || true)
