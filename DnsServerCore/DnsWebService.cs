@@ -1667,22 +1667,21 @@ namespace DnsServerCore
                 using JsonDocument doc = JsonDocument.Parse(json);
                 JsonElement root = doc.RootElement;
 
-                string forkBranch = root.TryGetProperty("forkBranch", out JsonElement branch) ? branch.GetString() : null;
                 string forkVersion = root.TryGetProperty("forkVersion", out JsonElement ver) ? ver.GetString() : null;
                 string forkShortName = root.TryGetProperty("forkShortName", out JsonElement name) ? name.GetString() : null;
+                string upstreamVersion = root.TryGetProperty("upstreamVersion", out JsonElement upstream) ? upstream.GetString() : null;
 
-                if (forkBranch is null && forkVersion is null)
+                if (forkVersion is null)
                     return null;
 
-                if (forkBranch is not null && forkVersion is not null)
-                {
-                    if (forkShortName is not null)
-                        return forkShortName + " | " + forkBranch + " \u2014 " + forkVersion;
+                // Strip "v" prefix for display
+                string displayVersion = forkVersion.StartsWith('v') ? forkVersion[1..] : forkVersion;
 
-                    return forkBranch + " \u2014 " + forkVersion;
-                }
-
-                return forkVersion ?? forkBranch;
+                // Format: "PiDoH 15.4.0-pidoh.1 (Technitium 15.4.0)"
+                string label = (forkShortName ?? "Fork") + " " + displayVersion;
+                if (upstreamVersion is not null)
+                    label += " (Technitium " + upstreamVersion + ")";
+                return label;
             }
             catch
             {
