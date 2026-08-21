@@ -26,6 +26,7 @@ using TechnitiumLibrary.Net;
 using TechnitiumLibrary.Net.Dns;
 using TechnitiumLibrary.Net.Dns.ResourceRecords;
 using TechnitiumLibrary.Net.Proxy;
+using DnsServerCore.Dns.ZoneManagers;
 
 namespace DnsServerCore.Dns
 {
@@ -62,16 +63,38 @@ namespace DnsServerCore.Dns
 
     /// <summary>
     /// Resolves CNAME chains for domain lookup, with support for loop detection.
+    /// Optionally checks AllowedZoneManager and BlockListZoneManager at each hop.
     /// </summary>
     public sealed class CnameChainResolver
     {
         private readonly IDnsResolver _dnsResolver;
         private readonly int _maxCnameHops;
+        private readonly AllowedZoneManager _allowedZoneManager;
+        private readonly BlockListZoneManager _blockListZoneManager;
 
-        public CnameChainResolver(IDnsResolver dnsResolver, int maxCnameHops = 16)
+        public CnameChainResolver(IDnsResolver dnsResolver, int maxCnameHops = 16, AllowedZoneManager allowedZoneManager = null, BlockListZoneManager blockListZoneManager = null)
         {
             _dnsResolver = dnsResolver ?? throw new ArgumentNullException(nameof(dnsResolver));
             _maxCnameHops = maxCnameHops;
+            _allowedZoneManager = allowedZoneManager;
+            _blockListZoneManager = blockListZoneManager;
+        }
+
+        /// <summary>
+        /// Checks if a domain is allowed by the AllowedZoneManager or BlockListZoneManager.
+        /// Mirrors the DNS pipeline pattern: AllowedZoneManager.IsAllowed(request) || BlockListZoneManager.IsAllowed(request).
+        /// </summary>
+        private bool IsDomainAllowed(string domain)
+        {
+            DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord(domain, DnsResourceRecordType.A, DnsClass.IN) });
+
+            if (_allowedZoneManager is not null && _allowedZoneManager.IsAllowed(request))
+                return true;
+
+            if (_blockListZoneManager is not null && _blockListZoneManager.IsAllowed(request))
+                return true;
+
+            return false;
         }
 
         /// <summary>
@@ -130,11 +153,14 @@ namespace DnsServerCore.Dns
                         if (!seenDomains.Add(targetDomain))
                             break; // loop detected
 
+                        bool isAllowed = IsDomainAllowed(targetDomain);
+
                         chain.Add(new CnameChainEntry
                         {
                             Domain = record.Name,
                             Type = "CNAME",
-                            Target = targetDomain
+                            Target = targetDomain,
+                            IsAllowed = isAllowed
                         });
 
                         hops++;
@@ -143,10 +169,13 @@ namespace DnsServerCore.Dns
                 else if (record.Type == DnsResourceRecordType.A || record.Type == DnsResourceRecordType.AAAA)
                 {
                     // Final record in the chain
+                    bool isAllowed = IsDomainAllowed(record.Name);
+
                     chain.Add(new CnameChainEntry
                     {
                         Domain = record.Name,
-                        Type = record.Type.ToString()
+                        Type = record.Type.ToString(),
+                        IsAllowed = isAllowed
                     });
 
                     break; // stop at the first non-CNAME record
@@ -165,10 +194,13 @@ namespace DnsServerCore.Dns
                 string lastTarget = chain[chain.Count - 1].Target;
                 if (!seenDomains.Contains(lastTarget))
                 {
+                    bool isAllowed = IsDomainAllowed(lastTarget);
+
                     chain.Add(new CnameChainEntry
                     {
                         Domain = lastTarget,
-                        Type = "A"
+                        Type = "A",
+                        IsAllowed = isAllowed
                     });
                 }
             }

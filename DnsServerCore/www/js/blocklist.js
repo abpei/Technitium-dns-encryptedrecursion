@@ -94,6 +94,18 @@ function refreshBlockLists() {
     });
 }
 
+// Format the allowedBy field into a human-readable label
+function formatAllowedBySource(allowedBy) {
+    switch (allowedBy) {
+        case "allowed-zone":
+            return "Allowed Zone";
+        case "blocklist":
+            return "Blocklist Allowlist";
+        default:
+            return "";
+    }
+}
+
 function formatBlockListStatus(status) {
     switch (status) {
         case "success":
@@ -142,8 +154,13 @@ function checkBlockListDomain() {
                 resultHtml += "<div class=\"alert alert-success\" style=\"margin-bottom: 5px;\"><b>NOT BLOCKED</b> — the domain is not in any block list.</div>";
             }
 
-            if (resp.isAllowed)
-                resultHtml += "<div class=\"alert alert-info\"><b>ALLOWED</b> — matched domain: " + htmlEncode(resp.matchedAllowedDomain) + "</div>";
+            if (resp.isAllowed) {
+                var allowedSource = formatAllowedBySource(resp.allowedBy);
+                resultHtml += "<div class=\"alert alert-info\"><b>ALLOWED</b> — matched domain: " + htmlEncode(resp.matchedAllowedDomain);
+                if (allowedSource)
+                    resultHtml += " (source: " + htmlEncode(allowedSource) + ")";
+                resultHtml += "</div>";
+            }
 
             // Resolution error warning
             if (resp.resolutionError) {
@@ -155,7 +172,7 @@ function checkBlockListDomain() {
             if (chain && chain.length > 0) {
                 resultHtml += "<div style=\"margin-top: 8px;\"><b>CNAME Resolution Chain:</b></div>";
                 resultHtml += "<table class=\"table table-bordered table-condensed\" style=\"margin-bottom: 5px; font-size: 12px;\">";
-                resultHtml += "<thead><tr><th>Domain</th><th>Type</th><th>Target</th><th>Status</th><th>Blocked By</th><th>Block Lists</th></tr></thead>";
+                resultHtml += "<thead><tr><th>Domain</th><th>Type</th><th>Target</th><th>Status</th><th>Blocked By</th><th>Block Lists</th><th>Allowed By</th></tr></thead>";
                 resultHtml += "<tbody>";
 
                 for (var i = 0; i < chain.length; i++) {
@@ -204,6 +221,14 @@ function checkBlockListDomain() {
                             resultHtml += htmlEncode(entry.blockListUrls[j]);
                         }
                         resultHtml += "</td>";
+                    } else {
+                        resultHtml += "<td>-</td>";
+                    }
+
+                    // Allowed by source
+                    if (entry.isAllowed && entry.allowedBy) {
+                        var allowedSource = formatAllowedBySource(entry.allowedBy);
+                        resultHtml += "<td><span class=\"label label-info\">" + htmlEncode(allowedSource) + "</span></td>";
                     } else {
                         resultHtml += "<td>-</td>";
                     }
