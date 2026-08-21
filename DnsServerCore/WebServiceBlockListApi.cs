@@ -18,14 +18,22 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 using DnsServerCore.Auth;
+using DnsServerCore.Dns;
 using DnsServerCore.Dns.ZoneManagers;
 using Microsoft.AspNetCore.Http;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 
+using TechnitiumLibrary;
+using TechnitiumLibrary.Net;
 using TechnitiumLibrary.Net.Dns;
+using TechnitiumLibrary.Net.Dns.ResourceRecords;
+using TechnitiumLibrary.Net.Proxy;
 
 namespace DnsServerCore
 {
@@ -49,7 +57,6 @@ namespace DnsServerCore
             #endregion
 
             #region public
-
             public void GetBlockListStatus(HttpContext context)
             {
                 User sessionUser = _dnsWebService.GetSessionUser(context);
@@ -123,7 +130,11 @@ namespace DnsServerCore
                 _dnsWebService._log.Write(_dnsWebService.GetRemoteEndPoint(context), "[" + sessionUser.Username + "] Block list status was retrieved.");
             }
 
-            public void CheckDomain(HttpContext context)
+            /// <summary>
+            /// Checks a domain against the blocklist, following CNAME chains via recursive DNS resolution.
+            /// Falls back to direct dictionary lookup on resolution failure or IP address input.
+            /// </summary>
+            public async Task CheckDomain(HttpContext context)
             {
                 User sessionUser = _dnsWebService.GetSessionUser(context);
 
@@ -143,35 +154,251 @@ namespace DnsServerCore
                 domain = domain.ToLowerInvariant();
 
                 BlockListZoneManager manager = _dnsWebService._dnsServer.BlockListZoneManager;
-
-                BlockListDomainCheckResult domainResult = manager.CheckDomain(domain);
-                BlockListAllowCheckResult allowResult = manager.CheckAllowList(domain);
-
                 Utf8JsonWriter jsonWriter = context.GetCurrentJsonWriter();
 
-                jsonWriter.WriteString("domain", domainResult.Domain);
-                jsonWriter.WriteBoolean("isBlocked", domainResult.IsBlocked);
-
-                if (domainResult.IsBlocked)
+                // Check if the input is an IP address; skip resolution for IPs
+                if (IPAddress.TryParse(domain, out _))
                 {
-                    jsonWriter.WriteString("matchedBlockedDomain", domainResult.BlockedDomain);
+                    // Direct lookup only for IP address input
+                    BlockListDomainCheckResult domainResult = manager.CheckDomain(domain);
+                    BlockListAllowCheckResult allowResult = manager.CheckAllowList(domain);
 
+                    jsonWriter.WriteString("domain", domainResult.Domain);
+                    jsonWriter.WriteBoolean("isBlocked", domainResult.IsBlocked);
+
+                    if (domainResult.IsBlocked)
+                    {
+                        jsonWriter.WriteString("matchedBlockedDomain", domainResult.BlockedDomain);
+                        jsonWriter.WritePropertyName("blockListUrls");
+                        jsonWriter.WriteStartArray();
+
+                        foreach (string url in domainResult.BlockListUrls)
+                            jsonWriter.WriteStringValue(url);
+
+                        jsonWriter.WriteEndArray();
+                    }
+
+                    jsonWriter.WriteBoolean("isAllowed", allowResult.IsAllowed);
+
+                    if (allowResult.IsAllowed)
+                        jsonWriter.WriteString("matchedAllowedDomain", allowResult.AllowedDomain);
+
+                    // Emit an empty chain for IP address inputs
+                    jsonWriter.WritePropertyName("chain");
+                    jsonWriter.WriteStartArray();
+                    jsonWriter.WriteEndArray();
+
+                    string logDomain = new string(domain.Where(c => !char.IsControl(c)).ToArray());
+                    _dnsWebService._log.Write(_dnsWebService.GetRemoteEndPoint(context), "[" + sessionUser.Username + "] Block list domain check (IP): " + logDomain);
+                    return;
+                }
+
+                // Attempt CNAME chain resolution, falling back to direct lookup on failure
+                List<CnameChainEntry> chain;
+                string resolutionError = null;
+
+                try
+                {
+                    DnsServer dnsServer = _dnsWebService._dnsServer;
+                    NetProxy proxy = dnsServer.Proxy;
+                    IPv6Mode ipv6Mode = dnsServer.IPv6Mode;
+                    ushort udpPayloadSize = dnsServer.UdpPayloadSize;
+                    bool randomizeName = dnsServer.RandomizeName;
+                    bool qnameMinimization = dnsServer.QnameMinimization;
+
+                    CnameChainResolver resolver = new CnameChainResolver(
+                        new DnsResolverAdapter(dnsServer),
+                        DnsServer.MAX_CNAME_HOPS);
+
+                    chain = await resolver.ResolveCnameChainAsync(
+                        domain, proxy, ipv6Mode, udpPayloadSize,
+                        randomizeName, qnameMinimization,
+                        CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _dnsWebService._log.Write(_dnsWebService.GetRemoteEndPoint(context), "[" + sessionUser.Username + "] Block list CNAME resolution error for '" + domain + "': " + ex.ToString());
+                    chain = null;
+                    resolutionError = ex.Message;
+                }
+
+                if ((chain is null) || (chain.Count == 0))
+                {
+                    // Fall back to direct dictionary lookup (current behavior)
+                    BlockListDomainCheckResult domainResult = manager.CheckDomain(domain);
+                    BlockListAllowCheckResult allowResult = manager.CheckAllowList(domain);
+
+                    jsonWriter.WriteString("domain", domainResult.Domain);
+                    jsonWriter.WriteBoolean("isBlocked", domainResult.IsBlocked);
+
+                    if (domainResult.IsBlocked)
+                    {
+                        jsonWriter.WriteString("matchedBlockedDomain", domainResult.BlockedDomain);
+                        jsonWriter.WritePropertyName("blockListUrls");
+                        jsonWriter.WriteStartArray();
+
+                        foreach (string url in domainResult.BlockListUrls)
+                            jsonWriter.WriteStringValue(url);
+
+                        jsonWriter.WriteEndArray();
+                    }
+
+                    jsonWriter.WriteBoolean("isAllowed", allowResult.IsAllowed);
+
+                    if (allowResult.IsAllowed)
+                        jsonWriter.WriteString("matchedAllowedDomain", allowResult.AllowedDomain);
+
+                    // Emit chain array (empty for fallback)
+                    jsonWriter.WritePropertyName("chain");
+                    jsonWriter.WriteStartArray();
+                    jsonWriter.WriteEndArray();
+
+                    if (resolutionError is not null)
+                        jsonWriter.WriteString("resolutionError", resolutionError);
+
+                    string logDomain = new string(domain.Where(c => !char.IsControl(c)).ToArray());
+                    _dnsWebService._log.Write(_dnsWebService.GetRemoteEndPoint(context), "[" + sessionUser.Username + "] Block list domain check (fallback): " + logDomain);
+                    return;
+                }
+
+                // Check each domain in the CNAME chain against blocklist and allowlist
+                string overallBlockedDomain = null;
+                List<string> overallBlockListUrls = new List<string>();
+                bool isAllowed = false;
+                string matchedAllowedDomain = null;
+
+                foreach (CnameChainEntry entry in chain)
+                {
+                    string checkDomain = entry.Target ?? entry.Domain;
+
+                    BlockListDomainCheckResult domainResult = manager.CheckDomain(checkDomain);
+                    BlockListAllowCheckResult allowResult = manager.CheckAllowList(checkDomain);
+
+                    entry.IsBlocked = domainResult.IsBlocked;
+                    entry.IsAllowed = allowResult.IsAllowed;
+
+                    if (domainResult.IsBlocked)
+                    {
+                        entry.BlockedDomain = domainResult.BlockedDomain;
+                        entry.BlockListUrls = domainResult.BlockListUrls;
+                    }
+
+                    // Allowlist overrides blocklist at each level; track the overall result
+                    if (allowResult.IsAllowed)
+                    {
+                        entry.IsBlocked = false;
+                        isAllowed = true;
+                        matchedAllowedDomain = allowResult.AllowedDomain;
+                    }
+
+                    if (domainResult.IsBlocked && !allowResult.IsAllowed)
+                    {
+                        if (overallBlockedDomain is null)
+                        {
+                            overallBlockedDomain = domainResult.BlockedDomain;
+                            overallBlockListUrls.AddRange(domainResult.BlockListUrls);
+                        }
+                    }
+                }
+
+                bool isBlocked = overallBlockedDomain is not null;
+
+                // Write the JSON response
+                jsonWriter.WriteString("domain", domain);
+                jsonWriter.WriteBoolean("isBlocked", isBlocked);
+
+                if (isBlocked)
+                {
+                    jsonWriter.WriteString("matchedBlockedDomain", overallBlockedDomain);
                     jsonWriter.WritePropertyName("blockListUrls");
                     jsonWriter.WriteStartArray();
 
-                    foreach (string url in domainResult.BlockListUrls)
+                    foreach (string url in overallBlockListUrls)
                         jsonWriter.WriteStringValue(url);
 
                     jsonWriter.WriteEndArray();
                 }
 
-                jsonWriter.WriteBoolean("isAllowed", allowResult.IsAllowed);
+                jsonWriter.WriteBoolean("isAllowed", isAllowed);
 
-                if (allowResult.IsAllowed)
-                    jsonWriter.WriteString("matchedAllowedDomain", allowResult.AllowedDomain);
+                if (isAllowed)
+                    jsonWriter.WriteString("matchedAllowedDomain", matchedAllowedDomain);
 
-                string logDomain = new string(domain.Where(c => !char.IsControl(c)).ToArray());
-                _dnsWebService._log.Write(_dnsWebService.GetRemoteEndPoint(context), "[" + sessionUser.Username + "] Block list domain check: " + logDomain);
+                // Write the CNAME chain
+                jsonWriter.WritePropertyName("chain");
+                jsonWriter.WriteStartArray();
+
+                foreach (CnameChainEntry entry in chain)
+                {
+                    jsonWriter.WriteStartObject();
+                    jsonWriter.WriteString("domain", entry.Domain);
+                    jsonWriter.WriteString("type", entry.Type);
+
+                    if (entry.Target is not null)
+                        jsonWriter.WriteString("target", entry.Target);
+
+                    jsonWriter.WriteBoolean("isBlocked", entry.IsBlocked);
+                    jsonWriter.WriteBoolean("isAllowed", entry.IsAllowed);
+
+                    if (entry.IsBlocked)
+                    {
+                        jsonWriter.WriteString("blockedDomain", entry.BlockedDomain);
+                        jsonWriter.WritePropertyName("blockListUrls");
+                        jsonWriter.WriteStartArray();
+
+                        if (entry.BlockListUrls is not null)
+                        {
+                            foreach (string url in entry.BlockListUrls)
+                                jsonWriter.WriteStringValue(url);
+                        }
+
+                        jsonWriter.WriteEndArray();
+                    }
+
+                    jsonWriter.WriteEndObject();
+                }
+
+                jsonWriter.WriteEndArray();
+
+                string safeLogDomain = new string(domain.Where(c => !char.IsControl(c)).ToArray());
+                _dnsWebService._log.Write(_dnsWebService.GetRemoteEndPoint(context), "[" + sessionUser.Username + "] Block list domain check: " + safeLogDomain);
+            }
+
+            #endregion
+
+            #region private
+
+            /// <summary>
+            /// Adapter that wraps DnsServer to implement IDnsResolver for CNAME chain resolution.
+            /// </summary>
+            sealed class DnsResolverAdapter : IDnsResolver
+            {
+                private readonly DnsServer _dnsServer;
+
+                public DnsResolverAdapter(DnsServer dnsServer)
+                {
+                    _dnsServer = dnsServer;
+                }
+
+                public async Task<DnsDatagram> RecursiveResolveAsync(
+                    DnsQuestionRecord question,
+                    DnsCache cache,
+                    NetProxy proxy,
+                    IPv6Mode ipv6Mode,
+                    ushort udpPayloadSize,
+                    bool randomizeName,
+                    bool qnameMinimization,
+                    bool skipDnsAppAuthoritativeRequestHandlers,
+                    CancellationToken cancellationToken)
+                {
+                    return await TechnitiumLibrary.TaskExtensions.TimeoutAsync(async delegate (CancellationToken ct)
+                    {
+                        return await DnsClient.RecursiveResolveAsync(
+                            question, cache, proxy, ipv6Mode, udpPayloadSize,
+                            randomizeName, qnameMinimization, false, null, 1, 10000,
+                            cancellationToken: ct);
+                    }, DnsServer.RECURSIVE_RESOLUTION_TIMEOUT);
+                }
             }
 
             #endregion
