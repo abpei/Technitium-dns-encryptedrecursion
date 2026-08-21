@@ -699,12 +699,12 @@ namespace DnsServerCore.Dns.ZoneManagers
 
             await Task.WhenAll(tasks);
 
+            // Always update status from the current cycle
+            _lastDownloadStatus = new Dictionary<string, (string, string)>(downloadStatuses);
+            LoadBlockLists();
+
             if (downloaded || forceReload)
             {
-                _lastDownloadStatus = new Dictionary<string, (string, string)>(downloadStatuses);
-
-                LoadBlockLists();
-
                 //force GC collection to remove old zone data from memory quickly
                 GC.Collect();
             }
