@@ -1,7 +1,7 @@
 {
-    "updateVersion": "15.4.0.11",
-    "updateTitle": "PiDoH Fork v15.4.0-dev11 Available!",
-    "updateMessage": "A new version of the encrypted-recursion fork is available. Domain checker now follows CNAME chains.",
-    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-dev11",
-    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-dev11"
+    "updateVersion": "15.4.0.12",
+    "updateTitle": "PiDoH Fork v15.4.0-dev12 Available!",
+    "updateMessage": "A new version of the encrypted-recursion fork is available. Dark mode fix for CNAME chain display.",
+    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-dev12",
+    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-dev12"
 }
