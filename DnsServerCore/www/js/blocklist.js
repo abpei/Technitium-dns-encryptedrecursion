@@ -143,7 +143,13 @@ function checkBlockListDomain() {
             var resp = responseJSON.response;
 
             // Overall result banner
-            if (resp.isBlocked) {
+            if (resp.isBlocked && resp.isAllowed) {
+                var allowedSource = formatAllowedBySource(resp.allowedBy);
+                resultHtml += "<div class=\"alert alert-success\" style=\"margin-bottom: 5px;\"><b>ALLOWED</b> — matched domain: " + htmlEncode(resp.matchedAllowedDomain);
+                if (allowedSource)
+                    resultHtml += " (source: " + htmlEncode(allowedSource) + ")";
+                resultHtml += "<br/>Note: domain is in a block list (" + htmlEncode(resp.matchedBlockedDomain) + ") but the allow rule takes precedence.</div>";
+            } else if (resp.isBlocked) {
                 resultHtml += "<div class=\"alert alert-danger\" style=\"margin-bottom: 5px;\"><b>BLOCKED</b> — matched domain: " + htmlEncode(resp.matchedBlockedDomain) + "<br/>Block list sources:<ul>";
                 if (resp.blockListUrls) {
                     for (var i = 0; i < resp.blockListUrls.length; i++)
@@ -154,7 +160,7 @@ function checkBlockListDomain() {
                 resultHtml += "<div class=\"alert alert-success\" style=\"margin-bottom: 5px;\"><b>NOT BLOCKED</b> — the domain is not in any block list.</div>";
             }
 
-            if (resp.isAllowed) {
+            if (resp.isAllowed && !resp.isBlocked) {
                 var allowedSource = formatAllowedBySource(resp.allowedBy);
                 resultHtml += "<div class=\"alert alert-info\"><b>ALLOWED</b> — matched domain: " + htmlEncode(resp.matchedAllowedDomain);
                 if (allowedSource)
