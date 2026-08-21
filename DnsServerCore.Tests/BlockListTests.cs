@@ -1,8 +1,13 @@
 using System.Reflection;
+using System.Net;
 using Xunit;
 using DnsServerCore;
 using DnsServerCore.Dns;
 using DnsServerCore.Dns.ZoneManagers;
+using TechnitiumLibrary.Net;
+using TechnitiumLibrary.Net.Dns;
+using TechnitiumLibrary.Net.Dns.ResourceRecords;
+using TechnitiumLibrary.Net.Proxy;
 
 namespace DnsServerCore.Tests;
 
@@ -319,5 +324,653 @@ public class BlockListTests : IDisposable
         Assert.Equal("alphonso.tv", result.Domain);
         Assert.True(result.IsBlocked);
         Assert.Equal("alphonso.tv", result.BlockedDomain);
+    }
+}
+
+/// <summary>
+/// Mock IDnsResolver for testing CNAME chain resolution without real DNS queries.
+/// </summary>
+public class MockDnsResolver : IDnsResolver
+{
+    private readonly Func<DnsQuestionRecord, Task<DnsDatagram>> _resolveFunc;
+
+    public MockDnsResolver(Func<DnsQuestionRecord, Task<DnsDatagram>> resolveFunc)
+    {
+        _resolveFunc = resolveFunc ?? throw new ArgumentNullException(nameof(resolveFunc));
+    }
+
+    public Task<DnsDatagram> RecursiveResolveAsync(
+        DnsQuestionRecord question,
+        DnsCache cache,
+        NetProxy proxy,
+        IPv6Mode ipv6Mode,
+        ushort udpPayloadSize,
+        bool randomizeName,
+        bool qnameMinimization,
+        bool skipDnsAppAuthoritativeRequestHandlers,
+        CancellationToken cancellationToken)
+    {
+        return _resolveFunc(question);
+    }
+
+    /// <summary>
+    /// Creates a mock DNS response with CNAME records followed by an A record.
+    /// </summary>
+    public static DnsDatagram CreateCnameChainResponse(string domain, string[] cnameTargets, string finalIp)
+    {
+        var answer = new List<DnsResourceRecord>();
+
+        // Add CNAME records
+        foreach (var target in cnameTargets)
+        {
+            answer.Add(new DnsResourceRecord(
+                domain,
+                DnsResourceRecordType.CNAME,
+                DnsClass.IN,
+                300,
+                new DnsCNAMERecordData(target)));
+            domain = target;
+        }
+
+        // Add final A record
+        answer.Add(new DnsResourceRecord(
+            domain,
+            DnsResourceRecordType.A,
+            DnsClass.IN,
+            300,
+            new DnsARecordData(IPAddress.Parse(finalIp))));
+
+        // Create query
+        var query = new DnsQuestionRecord(domain, DnsResourceRecordType.A, DnsClass.IN);
+
+        // Create response with positional parameters (matching DnsDatagram constructor signature)
+        return new DnsDatagram(
+            (ushort)Random.Shared.Next(1, 65535),  // identifier
+            true,                                    // isResponse
+            DnsOpcode.StandardQuery,                  // opcode
+            true,                                    // authoritativeAnswer
+            false,                                   // isTruncated
+            true,                                    // recursionDesired
+            true,                                    // recursionAvailable
+            true,                                    // authenticData
+            false,                                   // checkingDisabled
+            DnsResponseCode.NoError,                 // rcode
+            new DnsQuestionRecord[] { query },       // question
+            answer,                                  // answer
+            null,                                    // authority
+            null,                                    // additional
+            (ushort)4096,                            // udpPayloadSize
+            EDnsHeaderFlags.None,                    // ednsFlags
+            null);                                   // ednsOptions
+    }
+
+    /// <summary>
+    /// Creates a mock DNS response with a loop (A -> B -> A).
+    /// </summary>
+    public static DnsDatagram CreateCnameLoopResponse(string domain)
+    {
+        var answer = new List<DnsResourceRecord>
+        {
+            new DnsResourceRecord(
+                domain,
+                DnsResourceRecordType.CNAME,
+                DnsClass.IN,
+                300,
+                new DnsCNAMERecordData("target.example.com")),
+            new DnsResourceRecord(
+                "target.example.com",
+                DnsResourceRecordType.CNAME,
+                DnsClass.IN,
+                300,
+                new DnsCNAMERecordData(domain))
+        };
+
+        var query = new DnsQuestionRecord(domain, DnsResourceRecordType.A, DnsClass.IN);
+
+        return new DnsDatagram(
+            (ushort)Random.Shared.Next(1, 65535),
+            true,
+            DnsOpcode.StandardQuery,
+            true,
+            false,
+            true,
+            true,
+            true,
+            false,
+            DnsResponseCode.NoError,
+            new DnsQuestionRecord[] { query },
+            answer,
+            null,
+            null,
+            (ushort)4096,
+            EDnsHeaderFlags.None,
+            null);
+    }
+
+    /// <summary>
+    /// Creates a mock DNS response with no CNAME records (only A record).
+    /// </summary>
+    public static DnsDatagram CreateDirectAResponse(string domain, string ip)
+    {
+        var answer = new List<DnsResourceRecord>
+        {
+            new DnsResourceRecord(
+                domain,
+                DnsResourceRecordType.A,
+                DnsClass.IN,
+                300,
+                new DnsARecordData(IPAddress.Parse(ip)))
+        };
+
+        var query = new DnsQuestionRecord(domain, DnsResourceRecordType.A, DnsClass.IN);
+
+        return new DnsDatagram(
+            (ushort)Random.Shared.Next(1, 65535),
+            true,
+            DnsOpcode.StandardQuery,
+            true,
+            false,
+            true,
+            true,
+            true,
+            false,
+            DnsResponseCode.NoError,
+            new DnsQuestionRecord[] { query },
+            answer,
+            null,
+            null,
+            (ushort)4096,
+            EDnsHeaderFlags.None,
+            null);
+    }
+
+    /// <summary>
+    /// Creates a mock DNS response indicating failure (e.g., SERVFAIL, NXDOMAIN).
+    /// </summary>
+    public static DnsDatagram CreateErrorResponse(string domain, DnsResponseCode rcode)
+    {
+        var query = new DnsQuestionRecord(domain, DnsResourceRecordType.A, DnsClass.IN);
+
+        return new DnsDatagram(
+            (ushort)Random.Shared.Next(1, 65535),
+            true,
+            DnsOpcode.StandardQuery,
+            true,
+            false,
+            true,
+            true,
+            false,
+            false,
+            rcode,
+            new DnsQuestionRecord[] { query },
+            null,
+            null,
+            null,
+            (ushort)4096,
+            EDnsHeaderFlags.None,
+            null);
+    }
+}
+
+/// <summary>
+/// Unit tests for CnameChainResolver - CNAME chain resolution and checking logic.
+/// Uses mock DNS responses to simulate CNAME chains rather than making real DNS queries.
+/// </summary>
+public class CnameChainResolverTests : IDisposable
+{
+    private readonly string _tempConfigFolder;
+    private readonly string _tempDohwwwFolder;
+    private readonly DnsServer _dnsServer;
+    private readonly BlockListZoneManager _blockListZoneManager;
+    private readonly Uri _testBlockListUri = new("http://example.com/blocklist.txt");
+
+    public CnameChainResolverTests()
+    {
+        // Create temp directories for DnsServer
+        _tempConfigFolder = Path.Combine(Path.GetTempPath(), $"cname_test_{Guid.NewGuid():N}");
+        _tempDohwwwFolder = Path.Combine(Path.GetTempPath(), $"cname_dohwww_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_tempConfigFolder);
+        Directory.CreateDirectory(_tempDohwwwFolder);
+
+        var logManager = new LogManager(isPortableApp: true, configFolder: _tempConfigFolder);
+
+        _dnsServer = new DnsServer(
+            configFolder: _tempConfigFolder,
+            dohwwwFolder: _tempDohwwwFolder,
+            log: logManager,
+            serverDomain: "test.local"
+        );
+
+        var blockListField = typeof(DnsServer).GetField("_blockListZoneManager", BindingFlags.NonPublic | BindingFlags.Instance);
+        _blockListZoneManager = (BlockListZoneManager)blockListField!.GetValue(_dnsServer)!;
+    }
+
+    public void Dispose()
+    {
+        _dnsServer?.Dispose();
+
+        try
+        {
+            if (Directory.Exists(_tempConfigFolder))
+                Directory.Delete(_tempConfigFolder, recursive: true);
+            if (Directory.Exists(_tempDohwwwFolder))
+                Directory.Delete(_tempDohwwwFolder, recursive: true);
+        }
+        catch
+        {
+            // Cleanup failure is non-critical in tests
+        }
+    }
+
+    private void SetupBlockListZone(Dictionary<string, List<Uri>> blockListZone)
+    {
+        var field = typeof(BlockListZoneManager).GetField("_blockListZone", BindingFlags.NonPublic | BindingFlags.Instance);
+        field!.SetValue(_blockListZoneManager, blockListZone);
+    }
+
+    private void SetupAllowListZone(Dictionary<string, object> allowListZone)
+    {
+        var field = typeof(BlockListZoneManager).GetField("_allowListZone", BindingFlags.NonPublic | BindingFlags.Instance);
+        field!.SetValue(_blockListZoneManager, allowListZone);
+    }
+
+    /// <summary>
+    /// Helper to check a domain against the blocklist and return block/allow results.
+    /// </summary>
+    private (BlockListDomainCheckResult domainResult, BlockListAllowCheckResult allowResult) CheckDomainAgainstLists(string domain)
+    {
+        var domainResult = _blockListZoneManager.CheckDomain(domain);
+        var allowResult = _blockListZoneManager.CheckAllowList(domain);
+        return (domainResult, allowResult);
+    }
+
+    [Fact]
+    public async Task CnameChain_DomainWithCnameToBlockedTarget_ReturnsBlocked()
+    {
+        // Arrange - "ads.example.com" CNAME -> "blocked.example.com" (blocked)
+        SetupBlockListZone(new Dictionary<string, List<Uri>>
+        {
+            ["blocked.example.com"] = new List<Uri> { _testBlockListUri }
+        });
+        SetupAllowListZone(new Dictionary<string, object>());
+
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateCnameChainResponse(
+                "ads.example.com",
+                new[] { "blocked.example.com" },
+                "1.2.3.4"));
+        });
+
+        var resolver = new CnameChainResolver(mockResolver);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "ads.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(chain);
+        Assert.Equal(2, chain.Count); // CNAME + A record
+
+        // First entry is CNAME
+        Assert.Equal("ads.example.com", chain[0].Domain);
+        Assert.Equal("CNAME", chain[0].Type);
+        Assert.Equal("blocked.example.com", chain[0].Target);
+
+        // Second entry is A record (terminal)
+        Assert.Equal("blocked.example.com", chain[1].Domain);
+        Assert.Equal("A", chain[1].Type);
+
+        // Check against blocklist - should be blocked
+        foreach (var entry in chain)
+        {
+            string checkDomain = entry.Target ?? entry.Domain;
+            var (domainResult, allowResult) = CheckDomainAgainstLists(checkDomain);
+
+            entry.IsBlocked = domainResult.IsBlocked;
+            entry.IsAllowed = allowResult.IsAllowed;
+
+            if (domainResult.IsBlocked)
+            {
+                entry.BlockedDomain = domainResult.BlockedDomain;
+                entry.BlockListUrls = domainResult.BlockListUrls;
+            }
+
+            if (allowResult.IsAllowed)
+            {
+                entry.IsBlocked = false;
+            }
+        }
+
+        // Overall result should be blocked
+        Assert.True(chain.Any(e => e.IsBlocked));
+    }
+
+    [Fact]
+    public async Task CnameChain_DomainWithCnameToAllowedTarget_ReturnsAllowed()
+    {
+        // Arrange - "safe.example.com" CNAME -> "trusted.example.com" (allowed)
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>
+        {
+            ["trusted.example.com"] = null!
+        });
+
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateCnameChainResponse(
+                "safe.example.com",
+                new[] { "trusted.example.com" },
+                "5.6.7.8"));
+        });
+
+        var resolver = new CnameChainResolver(mockResolver);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "safe.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(chain);
+        Assert.Equal(2, chain.Count);
+
+        // Check against allowlist - should be allowed
+        foreach (var entry in chain)
+        {
+            string checkDomain = entry.Target ?? entry.Domain;
+            var (domainResult, allowResult) = CheckDomainAgainstLists(checkDomain);
+
+            entry.IsBlocked = domainResult.IsBlocked;
+            entry.IsAllowed = allowResult.IsAllowed;
+
+            if (allowResult.IsAllowed)
+            {
+                entry.IsBlocked = false;
+            }
+        }
+
+        // Overall result should not be blocked (allowlist overrides)
+        Assert.False(chain.Any(e => e.IsBlocked));
+        Assert.True(chain.Any(e => e.IsAllowed));
+    }
+
+    [Fact]
+    public async Task CnameChain_DomainWithNoCname_ReturnsNull()
+    {
+        // Arrange - direct A record only, no CNAME
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateDirectAResponse(
+                "direct.example.com",
+                "10.0.0.1"));
+        });
+
+        var resolver = new CnameChainResolver(mockResolver);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "direct.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert - returns null because no CNAME records found
+        Assert.Null(chain);
+    }
+
+    [Fact]
+    public async Task CnameChain_DomainWithCnameLoop_HandlesGracefully()
+    {
+        // Arrange - CNAME loop: A -> B -> A
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateCnameLoopResponse("loop.example.com"));
+        });
+
+        var resolver = new CnameChainResolver(mockResolver);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "loop.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert - loop detected, chain should have entries but not infinite
+        Assert.NotNull(chain);
+        // Should have at most 2 entries (the looping CNAMEs)
+        Assert.True(chain.Count <= 2);
+        // Should not crash or hang
+    }
+
+    [Fact]
+    public async Task CnameChain_ResolutionFailure_ReturnsNull()
+    {
+        // Arrange - throw exception on resolution
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            throw new TimeoutException("DNS resolution timed out");
+        });
+
+        var resolver = new CnameChainResolver(mockResolver);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "timeout.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert - returns null on failure
+        Assert.Null(chain);
+    }
+
+    [Fact]
+    public async Task CnameChain_EmptyAnswer_ReturnsNull()
+    {
+        // Arrange - empty answer section
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            var response = MockDnsResolver.CreateErrorResponse("empty.example.com", DnsResponseCode.NoError);
+            return Task.FromResult(response);
+        });
+
+        var resolver = new CnameChainResolver(mockResolver);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "empty.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert - returns null for empty answer
+        Assert.Null(chain);
+    }
+
+    [Fact]
+    public async Task CnameChain_MultiHopChain_IdentifiesBlockedDomainAtEnd()
+    {
+        // Arrange - A -> B -> C -> blocked.example.com (blocked)
+        SetupBlockListZone(new Dictionary<string, List<Uri>>
+        {
+            ["blocked.example.com"] = new List<Uri> { _testBlockListUri }
+        });
+        SetupAllowListZone(new Dictionary<string, object>());
+
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateCnameChainResponse(
+                "multi.example.com",
+                new[] { "b.example.com", "c.example.com", "blocked.example.com" },
+                "9.10.11.12"));
+        });
+
+        var resolver = new CnameChainResolver(mockResolver);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "multi.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(chain);
+        Assert.Equal(4, chain.Count); // 3 CNAME + 1 A record
+
+        // Check against blocklist
+        foreach (var entry in chain)
+        {
+            string checkDomain = entry.Target ?? entry.Domain;
+            var (domainResult, allowResult) = CheckDomainAgainstLists(checkDomain);
+
+            entry.IsBlocked = domainResult.IsBlocked;
+            entry.IsAllowed = allowResult.IsAllowed;
+
+            if (domainResult.IsBlocked)
+            {
+                entry.BlockedDomain = domainResult.BlockedDomain;
+                entry.BlockListUrls = domainResult.BlockListUrls;
+            }
+
+            if (allowResult.IsAllowed)
+            {
+                entry.IsBlocked = false;
+            }
+        }
+
+        // Should be blocked because "blocked.example.com" is in the chain
+        Assert.True(chain.Any(e => e.IsBlocked));
+        Assert.Equal("blocked.example.com", chain.First(e => e.IsBlocked).BlockedDomain);
+    }
+
+    [Fact]
+    public async Task CnameChain_AllowlistOverridesBlocklistAtIntermediateLevel()
+    {
+        // Arrange - "intermediate.example.com" is allowed, but "final.example.com" is blocked
+        // Chain: start.example.com -> intermediate.example.com -> final.example.com (blocked)
+        SetupBlockListZone(new Dictionary<string, List<Uri>>
+        {
+            ["final.example.com"] = new List<Uri> { _testBlockListUri }
+        });
+        SetupAllowListZone(new Dictionary<string, object>
+        {
+            ["intermediate.example.com"] = null!
+        });
+
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateCnameChainResponse(
+                "start.example.com",
+                new[] { "intermediate.example.com", "final.example.com" },
+                "13.14.15.16"));
+        });
+
+        var resolver = new CnameChainResolver(mockResolver);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "start.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(chain);
+        Assert.Equal(3, chain.Count); // 2 CNAME + 1 A record
+
+        // Check against blocklist and allowlist
+        bool isAllowed = false;
+        foreach (var entry in chain)
+        {
+            string checkDomain = entry.Target ?? entry.Domain;
+            var (domainResult, allowResult) = CheckDomainAgainstLists(checkDomain);
+
+            entry.IsBlocked = domainResult.IsBlocked;
+            entry.IsAllowed = allowResult.IsAllowed;
+
+            if (domainResult.IsBlocked)
+            {
+                entry.BlockedDomain = domainResult.BlockedDomain;
+                entry.BlockListUrls = domainResult.BlockListUrls;
+            }
+
+            // Allowlist overrides blocklist at each level
+            if (allowResult.IsAllowed)
+            {
+                entry.IsBlocked = false;
+                isAllowed = true;
+            }
+        }
+
+        // The intermediate domain is allowed, so the chain should report allowed
+        Assert.True(isAllowed);
+        // The intermediate entry should be marked as allowed
+        Assert.True(chain.Any(e => e.IsAllowed && e.Target == "intermediate.example.com"));
+    }
+
+    [Fact]
+    public async Task CnameChain_MaxHopsLimit_StopsAtMaxHops()
+    {
+        // Arrange - chain with more hops than MAX_CNAME_HOPS
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>());
+
+        // Create a chain with 20 CNAME hops
+        var cnameTargets = Enumerable.Range(1, 20).Select(i => $"hop{i}.example.com").ToArray();
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateCnameChainResponse(
+                "start.example.com",
+                cnameTargets,
+                "20.21.22.23"));
+        });
+
+        var resolver = new CnameChainResolver(mockResolver, maxCnameHops: 16);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "start.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert - chain should be limited to maxCnameHops
+        Assert.NotNull(chain);
+        // Should have at most 17 entries (16 CNAMEs + 1 terminal A record)
+        Assert.True(chain.Count <= 17);
+    }
+
+    [Fact]
+    public void CheckDomainAgainstLists_BlockedDomain_ReturnsBlockedStatus()
+    {
+        // Arrange
+        SetupBlockListZone(new Dictionary<string, List<Uri>>
+        {
+            ["malware.example.com"] = new List<Uri> { _testBlockListUri }
+        });
+        SetupAllowListZone(new Dictionary<string, object>());
+
+        // Act
+        var (domainResult, allowResult) = CheckDomainAgainstLists("malware.example.com");
+
+        // Assert
+        Assert.True(domainResult.IsBlocked);
+        Assert.Equal("malware.example.com", domainResult.BlockedDomain);
+        Assert.False(allowResult.IsAllowed);
+    }
+
+    [Fact]
+    public void CheckDomainAgainstLists_AllowedDomain_ReturnsAllowedStatus()
+    {
+        // Arrange
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>
+        {
+            ["trusted.example.com"] = null!
+        });
+
+        // Act
+        var (domainResult, allowResult) = CheckDomainAgainstLists("trusted.example.com");
+
+        // Assert
+        Assert.False(domainResult.IsBlocked);
+        Assert.True(allowResult.IsAllowed);
+        Assert.Equal("trusted.example.com", allowResult.AllowedDomain);
+    }
+
+    [Fact]
+    public void CheckDomainAgainstLists_DomainNotInLists_ReturnsNotBlockedAndNotAllowed()
+    {
+        // Arrange
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>());
+
+        // Act
+        var (domainResult, allowResult) = CheckDomainAgainstLists("unknown.example.com");
+
+        // Assert
+        Assert.False(domainResult.IsBlocked);
+        Assert.False(allowResult.IsAllowed);
     }
 }
