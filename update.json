@@ -1,7 +1,7 @@
 {
-    "updateVersion": "15.4.0-pidoh-dev.15",
-    "updateTitle": "PiDoH Fork v15.4.0-pidoh-dev.15 Available!",
-    "updateMessage": "Fix: domain checker now checks AllowedZone for original input domain in CNAME chain path.",
-    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh-dev.15",
-    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh-dev.15"
+    "updateVersion": "15.4.0-pidoh-dev.16",
+    "updateTitle": "PiDoH Fork v15.4.0-pidoh-dev.16 Available!",
+    "updateMessage": "Fix: CNAME chain allow/block determination now checks final target only. Root/domain whitelists no longer override blocked CNAME targets.",
+    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh-dev.16",
+    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh-dev.16"
 }
