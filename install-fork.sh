@@ -31,33 +31,29 @@ echo "=== PIDOH Fork Installer ==="
 echo "Branch: $BRANCH"
 echo ""
 
-# Fetch latest release using /releases/latest endpoint
-echo "Fetching latest release..."
-LATEST_JSON=$(curl -sf "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null || true)
-TAG=$(echo "$LATEST_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tag_name',''))" 2>/dev/null || true)
-ASSET_URL=$(echo "$LATEST_JSON" | python3 -c "
+# Fetch releases and find the most recent one matching the branch
+echo "Fetching releases..."
+ALL_JSON=$(curl -sf "https://api.github.com/repos/${REPO}/releases?per_page=20" 2>/dev/null || true)
+RELEASE=$(echo "$ALL_JSON" | python3 -c "
 import json,sys
-d=json.load(sys.stdin)
-assets=d.get('assets',[])
-print(assets[0]['browser_download_url'] if assets else '')
+releases=json.load(sys.stdin)
+for r in releases:
+    t=r.get('tag_name','')
+    if '${BRANCH}' == 'dev' and '-dev' in t:
+        a=r.get('assets',[])
+        print(json.dumps({'tag':t,'url':a[0]['browser_download_url'] if a else ''}))
+        break
+    elif '${BRANCH}' == 'master' and '-dev' not in t:
+        a=r.get('assets',[])
+        print(json.dumps({'tag':t,'url':a[0]['browser_download_url'] if a else ''}))
+        break
 " 2>/dev/null || true)
+TAG=$(echo "$RELEASE" | python3 -c "import json,sys; print(json.load(sys.stdin)['tag'])" 2>/dev/null || true)
+ASSET_URL=$(echo "$RELEASE" | python3 -c "import json,sys; print(json.load(sys.stdin)['url'])" 2>/dev/null || true)
 
 if [[ -z "$TAG" ]]; then
-    echo "ERROR: Could not fetch latest release from GitHub API"
+    echo "ERROR: No ${BRANCH} release found"
     exit 1
-fi
-
-# Verify the release matches the requested branch
-if [[ "$BRANCH" == "dev" ]]; then
-    if [[ "$TAG" != *"-dev"* ]]; then
-        echo "ERROR: Latest release ($TAG) is not a dev release"
-        exit 1
-    fi
-else
-    if [[ "$TAG" == *"-dev"* ]]; then
-        echo "ERROR: Latest release ($TAG) is a dev release. No master release found."
-        exit 1
-    fi
 fi
 
 echo "Latest release: $TAG"
