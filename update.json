@@ -1,7 +1,7 @@
 {
-    "updateVersion": "15.4.0-pidoh-dev.14",
-    "updateTitle": "PiDoH Fork v15.4.0-pidoh-dev.14 Available!",
-    "updateMessage": "A new version of the encrypted-recursion fork is available. Dark mode fix and download status fix.",
-    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh-dev.14",
-    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh-dev.14"
+    "updateVersion": "15.4.0-pidoh-dev.15",
+    "updateTitle": "PiDoH Fork v15.4.0-pidoh-dev.15 Available!",
+    "updateMessage": "Fix: domain checker now checks AllowedZone for original input domain in CNAME chain path.",
+    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh-dev.15",
+    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh-dev.15"
 }
