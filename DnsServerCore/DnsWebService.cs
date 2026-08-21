@@ -92,6 +92,7 @@ namespace DnsServerCore
         readonly WebServiceAuthApi _authApi;
         readonly WebServiceClusterApi _clusterApi;
         readonly WebServiceLogsApi _logsApi;
+        readonly WebServiceBlockListApi _blockListApi;
 
         WebApplication _webService;
         HttpClientNetworkHandler _ssoHttpHandler;
@@ -186,6 +187,7 @@ namespace DnsServerCore
             _authApi = new WebServiceAuthApi(this);
             _clusterApi = new WebServiceClusterApi(this);
             _logsApi = new WebServiceLogsApi(this);
+            _blockListApi = new WebServiceBlockListApi(this);
 
             _saveTimer = new Timer(delegate (object state)
             {
@@ -2235,6 +2237,10 @@ namespace DnsServerCore
             _webService.MapGetAndPost("/api/settings/getTsigKeyNames", _settingsApi.GetTsigKeyNames);
             _webService.MapGetAndPost("/api/settings/forceUpdateBlockLists", _settingsApi.ForceUpdateBlockLists);
             _webService.MapGetAndPost("/api/settings/temporaryDisableBlocking", _settingsApi.TemporaryDisableBlocking);
+
+            //block list
+            _webService.MapGetAndPost("/api/blockList/getStatus", _blockListApi.GetBlockListStatus);
+            _webService.MapGetAndPost("/api/blockList/checkDomain", _blockListApi.CheckDomain);
             _webService.MapGetAndPost("/api/settings/backup", _settingsApi.BackupSettingsAsync);
             _webService.MapPost("/api/settings/restore", _settingsApi.RestoreSettingsAsync);
 

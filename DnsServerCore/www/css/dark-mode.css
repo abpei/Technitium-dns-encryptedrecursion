@@ -353,3 +353,13 @@ body.dark-mode {
 .dark-mode .label-success {
     background-color: #357935;
 }
+
+.dark-mode .table > tbody > tr.danger > td {
+    color: #a94442 !important;
+    background-color: #f2dede !important;
+}
+
+.dark-mode .table > tbody > tr.success > td {
+    color: #3c763d !important;
+    background-color: #dff0d8 !important;
+}

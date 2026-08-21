@@ -25,4 +25,10 @@
     <ProjectReference Include="/srv/shared/technitium-dns-encryptedrecursion/DnsServerCore/DnsServerCore.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Reference Include="TechnitiumLibrary.Net">
+      <HintPath>/srv/shared/technitium-dns-encryptedrecursion/DnsServerCore/bin/Debug/TechnitiumLibrary.Net.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
 </Project>
