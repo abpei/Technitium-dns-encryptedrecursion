@@ -1,0 +1,131 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to release from'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - master
+      release_notes:
+        description: 'Custom release notes (optional)'
+        required: false
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+
+      - name: Read and bump version
+        id: version
+        run: |
+          # Read fork.json
+          FORK_VERSION=$(python3 -c "import json; print(json.load(open('DnsServerApp/fork.json'))['forkVersion'])")
+          FORK_BRANCH=$(python3 -c "import json; print(json.load(open('DnsServerApp/fork.json'))['forkBranch'])")
+          
+          echo "Current forkVersion: $FORK_VERSION"
+          echo "Fork branch: $FORK_BRANCH"
+          
+          # Extract the 4th digit (fork increment) - format: v15.4.0-pidoh-dev.16
+          # The pattern is vX.Y.Z-pidoh[-dev].N
+          NEW_VERSION=$(python3 -c "
+          import re
+          import json
+          
+          # Parse the version
+          match = re.match(r'(v\d+\.\d+\.\d+-pidoh(?:-dev)?\.)(\d+)', '$FORK_VERSION')
+          if not match:
+              print('ERROR: Could not parse version')
+              exit(1)
+          
+          prefix = match.group(1)
+          current_num = int(match.group(2))
+          new_num = current_num + 1
+          new_version = f'{prefix}{new_num}'
+          
+          # Update fork.json
+          with open('DnsServerApp/fork.json', 'r') as f:
+              fork_data = json.load(f)
+          fork_data['forkVersion'] = new_version
+          with open('DnsServerApp/fork.json', 'w') as f:
+              json.dump(fork_data, f, indent=4)
+          
+          # Update update.json
+          with open('update.json', 'r') as f:
+              update_data = json.load(f)
+          
+          # Remove 'v' prefix for updateVersion
+          update_version = new_version[1:]  # Remove 'v'
+          update_data['updateVersion'] = update_version
+          update_data['updateTitle'] = f'PiDoH Fork {new_version} Available!'
+          update_data['instructionsLink'] = f'https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/{new_version}'
+          update_data['changeLogLink'] = f'https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/{new_version}'
+          
+          with open('update.json', 'w') as f:
+              json.dump(update_data, f, indent=4)
+          
+          print(new_version)
+          ")
+          
+          echo "New version: $NEW_VERSION"
+          echo "fork_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "fork_branch=$FORK_BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add DnsServerApp/fork.json update.json
+          git commit -m "Bump version to ${{ steps.version.outputs.fork_version }}"
+          git push origin ${{ inputs.branch }}
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build
+        run: dotnet publish DnsServerApp/DnsServerApp.csproj -c Release -o ./publish
+
+      - name: Package
+        run: tar czf DnsServerPortable.tar.gz -C ./publish .
+
+      - name: Delete existing release (if any)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Delete existing release and tag if they exist
+          gh release delete "${{ steps.version.outputs.fork_version }}" --yes --cleanup-tag || true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Determine release notes
+          if [ -n "${{ inputs.release_notes }}" ]; then
+            NOTES="${{ inputs.release_notes }}"
+          else
+            NOTES=$(python3 -c "import json; print(json.load(open('update.json'))['updateMessage'])")
+          fi
+          
+          # Build release command
+          RELEASE_CMD="gh release create \"${{ steps.version.outputs.fork_version }}\" DnsServerPortable.tar.gz --title \"PiDoH ${{ steps.version.outputs.fork_version }}\" --notes \"$NOTES\""
+          
+          # Add --prerelease if forkBranch is dev
+          if [ "${{ steps.version.outputs.fork_branch }}" = "dev" ]; then
+            RELEASE_CMD="$RELEASE_CMD --prerelease"
+          fi
+          
+          eval $RELEASE_CMD
