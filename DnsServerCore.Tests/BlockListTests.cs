@@ -325,6 +325,284 @@ public class BlockListTests : IDisposable
         Assert.True(result.IsBlocked);
         Assert.Equal("alphonso.tv", result.BlockedDomain);
     }
+
+    #region AllowedZoneManager Integration Tests
+
+    [Fact]
+    public void CheckDomain_AllowedZoneManagerDomain_IsRecognizedAsAllowed()
+    {
+        // Arrange - add domain to AllowedZoneManager
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("trusted.example.com");
+
+        // Act - check domain with AllowedZoneManager parameter
+        var result = _blockListZoneManager.CheckDomain("trusted.example.com", _dnsServer.AllowedZoneManager);
+
+        // Assert - domain is recognized as allowed
+        Assert.True(result.IsAllowed);
+        Assert.Equal("trusted.example.com", result.AllowedDomain);
+        Assert.False(result.IsBlocked);
+    }
+
+    [Fact]
+    public void CheckDomain_AllowedZoneManagerSubdomain_IsAlsoAllowed()
+    {
+        // Arrange - add parent domain to AllowedZoneManager
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("trusted.example.com");
+
+        // Act - check subdomain with AllowedZoneManager parameter
+        var result = _blockListZoneManager.CheckDomain("sub.trusted.example.com", _dnsServer.AllowedZoneManager);
+
+        // Assert - subdomain is recognized as allowed due to parent domain match
+        Assert.True(result.IsAllowed);
+        Assert.Equal("sub.trusted.example.com", result.AllowedDomain);
+        Assert.False(result.IsBlocked);
+    }
+
+    [Fact]
+    public void CheckDomain_AllowedZoneManagerNotInList_ReturnsNotAllowed()
+    {
+        // Arrange - add a different domain to AllowedZoneManager
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("other.example.com");
+
+        // Act - check domain not in AllowedZoneManager
+        var result = _blockListZoneManager.CheckDomain("unknown.example.com", _dnsServer.AllowedZoneManager);
+
+        // Assert - domain is not recognized as allowed
+        Assert.False(result.IsAllowed);
+        Assert.Null(result.AllowedDomain);
+        Assert.False(result.IsBlocked);
+    }
+
+    [Fact]
+    public void CheckAllowList_AllowedZoneManagerDomain_IsRecognizedAsAllowed()
+    {
+        // Arrange - add domain to AllowedZoneManager
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("trusted.example.com");
+
+        // Act - check allowlist with AllowedZoneManager parameter
+        var result = _blockListZoneManager.CheckAllowList("trusted.example.com", _dnsServer.AllowedZoneManager);
+
+        // Assert - domain is recognized as allowed
+        Assert.True(result.IsAllowed);
+        Assert.Equal("trusted.example.com", result.AllowedDomain);
+    }
+
+    [Fact]
+    public void CheckAllowList_AllowedZoneManagerNotInList_ReturnsNotAllowed()
+    {
+        // Arrange - add a different domain to AllowedZoneManager
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("other.example.com");
+
+        // Act - check allowlist for domain not in AllowedZoneManager
+        var result = _blockListZoneManager.CheckAllowList("unknown.example.com", _dnsServer.AllowedZoneManager);
+
+        // Assert - domain is not recognized as allowed
+        Assert.False(result.IsAllowed);
+        Assert.Null(result.AllowedDomain);
+    }
+
+    [Fact]
+    public void CheckDomain_BlocklistAllowlist_ReturnsAllowed()
+    {
+        // Arrange - add domain to blocklist allowlist
+        var allowListZone = new Dictionary<string, object>
+        {
+            ["whitelisted.example.com"] = null!
+        };
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(allowListZone);
+
+        // Act - check domain with AllowedZoneManager parameter (but domain not in AllowedZoneManager)
+        var result = _blockListZoneManager.CheckDomain("whitelisted.example.com", _dnsServer.AllowedZoneManager);
+
+        // Assert - domain is recognized as allowed via blocklist allowlist
+        Assert.True(result.IsAllowed);
+        Assert.Equal("whitelisted.example.com", result.AllowedDomain);
+        Assert.False(result.IsBlocked);
+    }
+
+    [Fact]
+    public void CheckAllowList_BlocklistAllowlist_ReturnsAllowed()
+    {
+        // Arrange - add domain to blocklist allowlist
+        var allowListZone = new Dictionary<string, object>
+        {
+            ["whitelisted.example.com"] = null!
+        };
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(allowListZone);
+
+        // Act - check allowlist with AllowedZoneManager parameter (but domain not in AllowedZoneManager)
+        var result = _blockListZoneManager.CheckAllowList("whitelisted.example.com", _dnsServer.AllowedZoneManager);
+
+        // Assert - domain is recognized as allowed via blocklist allowlist
+        Assert.True(result.IsAllowed);
+        Assert.Equal("whitelisted.example.com", result.AllowedDomain);
+    }
+
+    [Fact]
+    public void CheckDomain_NeitherInAllowedNorBlocklist_ReturnsNotAllowed()
+    {
+        // Arrange - add a different domain to AllowedZoneManager and blocklist allowlist
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>
+        {
+            ["other1.example.com"] = null!
+        });
+        _dnsServer.AllowedZoneManager.AllowZone("other2.example.com");
+
+        // Act - check domain not in either list
+        var result = _blockListZoneManager.CheckDomain("unknown.example.com", _dnsServer.AllowedZoneManager);
+
+        // Assert - domain is not recognized as allowed
+        Assert.False(result.IsAllowed);
+        Assert.Null(result.AllowedDomain);
+        Assert.False(result.IsBlocked);
+    }
+
+    [Fact]
+    public void CheckAllowList_NeitherInAllowedNorBlocklist_ReturnsNotAllowed()
+    {
+        // Arrange - add a different domain to AllowedZoneManager and blocklist allowlist
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>
+        {
+            ["other1.example.com"] = null!
+        });
+        _dnsServer.AllowedZoneManager.AllowZone("other2.example.com");
+
+        // Act - check allowlist for domain not in either list
+        var result = _blockListZoneManager.CheckAllowList("unknown.example.com", _dnsServer.AllowedZoneManager);
+
+        // Assert - domain is not recognized as allowed
+        Assert.False(result.IsAllowed);
+        Assert.Null(result.AllowedDomain);
+    }
+
+    [Fact]
+    public void CheckDomain_BothAllowedZoneAndBlocklistAllowlist_IsRecognizedAsAllowed()
+    {
+        // Arrange - add domain to both AllowedZoneManager and blocklist allowlist
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>
+        {
+            ["trusted.example.com"] = null!
+        });
+        _dnsServer.AllowedZoneManager.AllowZone("trusted.example.com");
+
+        // Act - check domain with AllowedZoneManager parameter
+        var result = _blockListZoneManager.CheckDomain("trusted.example.com", _dnsServer.AllowedZoneManager);
+
+        // Assert - domain is recognized as allowed (blocklist allowlist is checked first)
+        Assert.True(result.IsAllowed);
+        Assert.Equal("trusted.example.com", result.AllowedDomain);
+        Assert.False(result.IsBlocked);
+    }
+
+    [Fact]
+    public void CheckAllowList_BothAllowedZoneAndBlocklistAllowlist_IsRecognizedAsAllowed()
+    {
+        // Arrange - add domain to both AllowedZoneManager and blocklist allowlist
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>
+        {
+            ["trusted.example.com"] = null!
+        });
+        _dnsServer.AllowedZoneManager.AllowZone("trusted.example.com");
+
+        // Act - check allowlist with AllowedZoneManager parameter
+        var result = _blockListZoneManager.CheckAllowList("trusted.example.com", _dnsServer.AllowedZoneManager);
+
+        // Assert - domain is recognized as allowed (blocklist allowlist is checked first)
+        Assert.True(result.IsAllowed);
+        Assert.Equal("trusted.example.com", result.AllowedDomain);
+    }
+
+    [Fact]
+    public void CheckDomain_AllowedZoneManagerTakesPrecedence_WhenBlocklistDoesNotBlock()
+    {
+        // Arrange - domain is in AllowedZoneManager but NOT in blocklist allowlist
+        // This tests that AllowedZoneManager is checked when blocklist allowlist doesn't match
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("trusted.example.com");
+
+        // Act - check domain with AllowedZoneManager parameter
+        var result = _blockListZoneManager.CheckDomain("trusted.example.com", _dnsServer.AllowedZoneManager);
+
+        // Assert - AllowedZoneManager allows the domain
+        Assert.True(result.IsAllowed);
+        Assert.Equal("trusted.example.com", result.AllowedDomain);
+        Assert.False(result.IsBlocked);
+    }
+
+    [Fact]
+    public void CheckDomain_AllowedZoneManagerCheckHappensAfterBlocklistAllowlist()
+    {
+        // Arrange - domain is in blocklist allowlist, AllowedZoneManager is checked after
+        // This verifies the order: blocklist allowlist first, then AllowedZoneManager
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>
+        {
+            ["whitelisted.example.com"] = null!
+        });
+        _dnsServer.AllowedZoneManager.AllowZone("other.example.com");
+
+        // Act - check domain that is in blocklist allowlist
+        var result = _blockListZoneManager.CheckDomain("whitelisted.example.com", _dnsServer.AllowedZoneManager);
+
+        // Assert - domain is allowed via blocklist allowlist
+        Assert.True(result.IsAllowed);
+        Assert.Equal("whitelisted.example.com", result.AllowedDomain);
+    }
+
+    [Fact]
+    public void CheckDomain_NullAllowedZoneManager_StillWorks()
+    {
+        // Arrange - add domain to blocklist allowlist
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>
+        {
+            ["whitelisted.example.com"] = null!
+        });
+
+        // Act - check domain with null AllowedZoneManager parameter
+        var result = _blockListZoneManager.CheckDomain("whitelisted.example.com", null);
+
+        // Assert - domain is still recognized as allowed via blocklist allowlist
+        Assert.True(result.IsAllowed);
+        Assert.Equal("whitelisted.example.com", result.AllowedDomain);
+    }
+
+    [Fact]
+    public void CheckAllowList_NullAllowedZoneManager_StillWorks()
+    {
+        // Arrange - add domain to blocklist allowlist
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>
+        {
+            ["whitelisted.example.com"] = null!
+        });
+
+        // Act - check allowlist with null AllowedZoneManager parameter
+        var result = _blockListZoneManager.CheckAllowList("whitelisted.example.com", null);
+
+        // Assert - domain is still recognized as allowed via blocklist allowlist
+        Assert.True(result.IsAllowed);
+        Assert.Equal("whitelisted.example.com", result.AllowedDomain);
+    }
+
+    #endregion
 }
 
 /// <summary>
@@ -972,5 +1250,192 @@ public class CnameChainResolverTests : IDisposable
         // Assert
         Assert.False(domainResult.IsBlocked);
         Assert.False(allowResult.IsAllowed);
+    }
+
+    [Fact]
+    public async Task CnameChain_AllowedZoneManager_AllowsDomainAtHop()
+    {
+        // Arrange - "trusted.example.com" is in the AllowedZoneManager
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>());
+
+        // Add domain to AllowedZoneManager
+        _dnsServer.AllowedZoneManager.AllowZone("trusted.example.com");
+
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateCnameChainResponse(
+                "safe.example.com",
+                new[] { "trusted.example.com" },
+                "5.6.7.8"));
+        });
+
+        var resolver = new CnameChainResolver(
+            mockResolver,
+            allowedZoneManager: _dnsServer.AllowedZoneManager,
+            blockListZoneManager: _blockListZoneManager);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "safe.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(chain);
+        Assert.Equal(2, chain.Count);
+
+        // The CNAME target should be marked as allowed by AllowedZoneManager
+        var cnameEntry = chain.First(e => e.Type == "CNAME");
+        Assert.True(cnameEntry.IsAllowed);
+        Assert.Equal("trusted.example.com", cnameEntry.Target);
+    }
+
+    [Fact]
+    public async Task CnameChain_BlockListZoneManager_AllowsDomainAtHop()
+    {
+        // Arrange - "trusted.example.com" is in the BlockListZoneManager allowlist
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>
+        {
+            ["trusted.example.com"] = null!
+        });
+
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateCnameChainResponse(
+                "safe.example.com",
+                new[] { "trusted.example.com" },
+                "5.6.7.8"));
+        });
+
+        var resolver = new CnameChainResolver(
+            mockResolver,
+            allowedZoneManager: null,
+            blockListZoneManager: _blockListZoneManager);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "safe.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(chain);
+        Assert.Equal(2, chain.Count);
+
+        // The CNAME target should be marked as allowed by BlockListZoneManager
+        var cnameEntry = chain.First(e => e.Type == "CNAME");
+        Assert.True(cnameEntry.IsAllowed);
+        Assert.Equal("trusted.example.com", cnameEntry.Target);
+    }
+
+    [Fact]
+    public async Task CnameChain_BothManagers_AllowsDomainAtHop()
+    {
+        // Arrange - "trusted.example.com" is in both AllowedZoneManager and BlockListZoneManager
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>
+        {
+            ["trusted.example.com"] = null!
+        });
+
+        _dnsServer.AllowedZoneManager.AllowZone("trusted.example.com");
+
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateCnameChainResponse(
+                "safe.example.com",
+                new[] { "trusted.example.com" },
+                "5.6.7.8"));
+        });
+
+        var resolver = new CnameChainResolver(
+            mockResolver,
+            allowedZoneManager: _dnsServer.AllowedZoneManager,
+            blockListZoneManager: _blockListZoneManager);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "safe.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(chain);
+        Assert.Equal(2, chain.Count);
+
+        // The CNAME target should be marked as allowed (AllowedZoneManager is checked first)
+        var cnameEntry = chain.First(e => e.Type == "CNAME");
+        Assert.True(cnameEntry.IsAllowed);
+    }
+
+    [Fact]
+    public async Task CnameChain_NoManagers_IsAllowedDefaultsFalse()
+    {
+        // Arrange - no managers provided, IsAllowed should be false
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>());
+
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateCnameChainResponse(
+                "safe.example.com",
+                new[] { "target.example.com" },
+                "5.6.7.8"));
+        });
+
+        var resolver = new CnameChainResolver(mockResolver);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "safe.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(chain);
+        Assert.Equal(2, chain.Count);
+
+        // IsAllowed should be false when no managers are provided
+        foreach (var entry in chain)
+        {
+            Assert.False(entry.IsAllowed);
+        }
+    }
+
+    [Fact]
+    public async Task CnameChain_MultiHop_AllowedZoneManagerChecksEachHop()
+    {
+        // Arrange - "intermediate.example.com" is in AllowedZoneManager, "final.example.com" is not
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>());
+
+        _dnsServer.AllowedZoneManager.AllowZone("intermediate.example.com");
+
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateCnameChainResponse(
+                "start.example.com",
+                new[] { "intermediate.example.com", "final.example.com" },
+                "13.14.15.16"));
+        });
+
+        var resolver = new CnameChainResolver(
+            mockResolver,
+            allowedZoneManager: _dnsServer.AllowedZoneManager,
+            blockListZoneManager: _blockListZoneManager);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "start.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(chain);
+        Assert.Equal(3, chain.Count); // 2 CNAME + 1 A record
+
+        // First CNAME hop (intermediate.example.com) should be allowed
+        var firstCname = chain.First(e => e.Type == "CNAME" && e.Target == "intermediate.example.com");
+        Assert.True(firstCname.IsAllowed);
+
+        // Second CNAME hop (final.example.com) should NOT be allowed
+        var secondCname = chain.First(e => e.Type == "CNAME" && e.Target == "final.example.com");
+        Assert.False(secondCname.IsAllowed);
+
+        // Terminal A record should NOT be allowed
+        var aRecord = chain.First(e => e.Type == "A");
+        Assert.False(aRecord.IsAllowed);
     }
 }
