@@ -128,20 +128,91 @@ function checkBlockListDomain() {
         token: sessionData.token,
         success: function (responseJSON) {
             var resultHtml = "";
+            var resp = responseJSON.response;
 
-            if (responseJSON.response.isBlocked) {
-                resultHtml += "<div class=\"alert alert-danger\" style=\"margin-bottom: 5px;\"><b>BLOCKED</b> — matched domain: " + htmlEncode(responseJSON.response.matchedBlockedDomain) + "<br/>Block list sources:<ul>";
-                if (responseJSON.response.blockListUrls) {
-                    for (var i = 0; i < responseJSON.response.blockListUrls.length; i++)
-                        resultHtml += "<li>" + htmlEncode(responseJSON.response.blockListUrls[i]) + "</li>";
+            // Overall result banner
+            if (resp.isBlocked) {
+                resultHtml += "<div class=\"alert alert-danger\" style=\"margin-bottom: 5px;\"><b>BLOCKED</b> — matched domain: " + htmlEncode(resp.matchedBlockedDomain) + "<br/>Block list sources:<ul>";
+                if (resp.blockListUrls) {
+                    for (var i = 0; i < resp.blockListUrls.length; i++)
+                        resultHtml += "<li>" + htmlEncode(resp.blockListUrls[i]) + "</li>";
                 }
                 resultHtml += "</ul></div>";
             } else {
                 resultHtml += "<div class=\"alert alert-success\" style=\"margin-bottom: 5px;\"><b>NOT BLOCKED</b> — the domain is not in any block list.</div>";
             }
 
-            if (responseJSON.response.isAllowed)
-                resultHtml += "<div class=\"alert alert-info\"><b>ALLOWED</b> — matched domain: " + htmlEncode(responseJSON.response.matchedAllowedDomain) + "</div>";
+            if (resp.isAllowed)
+                resultHtml += "<div class=\"alert alert-info\"><b>ALLOWED</b> — matched domain: " + htmlEncode(resp.matchedAllowedDomain) + "</div>";
+
+            // Resolution error warning
+            if (resp.resolutionError) {
+                resultHtml += "<div class=\"alert alert-warning\" style=\"margin-bottom: 5px;\"><b>Resolution Error:</b> " + htmlEncode(resp.resolutionError) + " — falling back to direct lookup.</div>";
+            }
+
+            // CNAME chain display (backward compatible: only if chain exists and is non-empty)
+            var chain = resp.chain;
+            if (chain && chain.length > 0) {
+                resultHtml += "<div style=\"margin-top: 8px;\"><b>CNAME Resolution Chain:</b></div>";
+                resultHtml += "<table class=\"table table-bordered table-condensed\" style=\"margin-bottom: 5px; font-size: 12px;\">";
+                resultHtml += "<thead><tr><th>Domain</th><th>Type</th><th>Target</th><th>Status</th><th>Blocked By</th><th>Block Lists</th></tr></thead>";
+                resultHtml += "<tbody>";
+
+                for (var i = 0; i < chain.length; i++) {
+                    var entry = chain[i];
+
+                    // Determine row highlighting: highlight the entry where the block/allow match occurred
+                    var rowClass = "";
+                    if (entry.isBlocked && !entry.isAllowed) {
+                        rowClass = " style=\"background-color: #f2dede;\"";  // light red background
+                    } else if (entry.isAllowed) {
+                        rowClass = " style=\"background-color: #dff0d8;\"";  // light green background
+                    }
+
+                    resultHtml += "<tr" + rowClass + ">";
+
+                    // Domain name
+                    resultHtml += "<td>" + htmlEncode(entry.domain) + "</td>";
+
+                    // Record type
+                    resultHtml += "<td>" + htmlEncode(entry.type) + "</td>";
+
+                    // Target (for CNAME entries)
+                    resultHtml += "<td>" + (entry.target ? htmlEncode(entry.target) : "-") + "</td>";
+
+                    // Status indicator
+                    if (entry.isBlocked && !entry.isAllowed) {
+                        resultHtml += "<td><span class=\"label label-danger\">BLOCKED</span></td>";
+                    } else if (entry.isAllowed) {
+                        resultHtml += "<td><span class=\"label label-info\">ALLOWED</span></td>";
+                    } else {
+                        resultHtml += "<td><span class=\"label label-default\">OK</span></td>";
+                    }
+
+                    // Blocked by domain
+                    if (entry.isBlocked) {
+                        resultHtml += "<td>" + htmlEncode(entry.blockedDomain || "-") + "</td>";
+                    } else {
+                        resultHtml += "<td>-</td>";
+                    }
+
+                    // Block list URLs
+                    if (entry.isBlocked && entry.blockListUrls && entry.blockListUrls.length > 0) {
+                        resultHtml += "<td>";
+                        for (var j = 0; j < entry.blockListUrls.length; j++) {
+                            if (j > 0) resultHtml += "<br/>";
+                            resultHtml += htmlEncode(entry.blockListUrls[j]);
+                        }
+                        resultHtml += "</td>";
+                    } else {
+                        resultHtml += "<td>-</td>";
+                    }
+
+                    resultHtml += "</tr>";
+                }
+
+                resultHtml += "</tbody></table>";
+            }
 
             divResult.html(resultHtml);
 
