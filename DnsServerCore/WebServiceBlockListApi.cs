@@ -307,6 +307,19 @@ namespace DnsServerCore
                 string allowedBy = null;
                 AllowedZoneManager allowedZoneManager = _dnsWebService._dnsServer.AllowedZoneManager;
 
+                // Check the original input domain against AllowedZoneManager
+                if (allowedZoneManager is not null)
+                {
+                    DnsDatagram originalRequest = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord(domain, DnsResourceRecordType.A, DnsClass.IN) });
+
+                    if (allowedZoneManager.IsAllowed(originalRequest))
+                    {
+                        allowedBy = "allowed-zone";
+                        isAllowed = true;
+                        matchedAllowedDomain = domain;
+                    }
+                }
+
                 foreach (CnameChainEntry entry in chain)
                 {
                     string checkDomain = entry.Target ?? entry.Domain;
