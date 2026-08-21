@@ -160,6 +160,18 @@ namespace DnsServerCore
                 if (IPAddress.TryParse(domain, out _))
                 {
                     // Direct lookup only for IP address input
+                    // Check allowed-zone first (mirrors DNS pipeline), then blocklist
+                    string ipAllowedBy = null;
+                    AllowedZoneManager ipAllowedZoneManager = _dnsWebService._dnsServer.AllowedZoneManager;
+
+                    if (ipAllowedZoneManager is not null)
+                    {
+                        DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord(domain, DnsResourceRecordType.A, DnsClass.IN) });
+
+                        if (ipAllowedZoneManager.IsAllowed(request))
+                            ipAllowedBy = "allowed-zone";
+                    }
+
                     BlockListDomainCheckResult domainResult = manager.CheckDomain(domain);
                     BlockListAllowCheckResult allowResult = manager.CheckAllowList(domain);
 
@@ -181,7 +193,14 @@ namespace DnsServerCore
                     jsonWriter.WriteBoolean("isAllowed", allowResult.IsAllowed);
 
                     if (allowResult.IsAllowed)
+                    {
                         jsonWriter.WriteString("matchedAllowedDomain", allowResult.AllowedDomain);
+                        if (ipAllowedBy is null)
+                            ipAllowedBy = "blocklist";
+                    }
+
+                    if (ipAllowedBy is not null)
+                        jsonWriter.WriteString("allowedBy", ipAllowedBy);
 
                     // Emit an empty chain for IP address inputs
                     jsonWriter.WritePropertyName("chain");
@@ -225,6 +244,18 @@ namespace DnsServerCore
                 if ((chain is null) || (chain.Count == 0))
                 {
                     // Fall back to direct dictionary lookup (current behavior)
+                    // Check allowed-zone first (mirrors DNS pipeline), then blocklist
+                    string fbAllowedBy = null;
+                    AllowedZoneManager fbAllowedZoneManager = _dnsWebService._dnsServer.AllowedZoneManager;
+
+                    if (fbAllowedZoneManager is not null)
+                    {
+                        DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord(domain, DnsResourceRecordType.A, DnsClass.IN) });
+
+                        if (fbAllowedZoneManager.IsAllowed(request))
+                            fbAllowedBy = "allowed-zone";
+                    }
+
                     BlockListDomainCheckResult domainResult = manager.CheckDomain(domain);
                     BlockListAllowCheckResult allowResult = manager.CheckAllowList(domain);
 
@@ -246,7 +277,14 @@ namespace DnsServerCore
                     jsonWriter.WriteBoolean("isAllowed", allowResult.IsAllowed);
 
                     if (allowResult.IsAllowed)
+                    {
                         jsonWriter.WriteString("matchedAllowedDomain", allowResult.AllowedDomain);
+                        if (fbAllowedBy is null)
+                            fbAllowedBy = "blocklist";
+                    }
+
+                    if (fbAllowedBy is not null)
+                        jsonWriter.WriteString("allowedBy", fbAllowedBy);
 
                     // Emit chain array (empty for fallback)
                     jsonWriter.WritePropertyName("chain");
@@ -266,10 +304,25 @@ namespace DnsServerCore
                 List<string> overallBlockListUrls = new List<string>();
                 bool isAllowed = false;
                 string matchedAllowedDomain = null;
+                string allowedBy = null;
+                AllowedZoneManager allowedZoneManager = _dnsWebService._dnsServer.AllowedZoneManager;
 
                 foreach (CnameChainEntry entry in chain)
                 {
                     string checkDomain = entry.Target ?? entry.Domain;
+
+                    // Check allowed-zone first (mirrors DNS pipeline)
+                    if (allowedBy is null && allowedZoneManager is not null)
+                    {
+                        DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord(checkDomain, DnsResourceRecordType.A, DnsClass.IN) });
+
+                        if (allowedZoneManager.IsAllowed(request))
+                        {
+                            allowedBy = "allowed-zone";
+                            isAllowed = true;
+                            matchedAllowedDomain = checkDomain;
+                        }
+                    }
 
                     BlockListDomainCheckResult domainResult = manager.CheckDomain(checkDomain);
                     BlockListAllowCheckResult allowResult = manager.CheckAllowList(checkDomain);
@@ -289,6 +342,8 @@ namespace DnsServerCore
                         entry.IsBlocked = false;
                         isAllowed = true;
                         matchedAllowedDomain = allowResult.AllowedDomain;
+                        if (allowedBy is null)
+                            allowedBy = "blocklist";
                     }
 
                     if (domainResult.IsBlocked && !allowResult.IsAllowed)
@@ -323,6 +378,9 @@ namespace DnsServerCore
 
                 if (isAllowed)
                     jsonWriter.WriteString("matchedAllowedDomain", matchedAllowedDomain);
+
+                if (allowedBy is not null)
+                    jsonWriter.WriteString("allowedBy", allowedBy);
 
                 // Write the CNAME chain
                 jsonWriter.WritePropertyName("chain");
