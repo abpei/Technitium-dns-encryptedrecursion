@@ -89,6 +89,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add DnsServerApp/fork.json update.json
           git commit -m "Bump version to ${{ steps.version.outputs.fork_version }}"
+          # NOTE: assumes no branch protections on dev; will fail if protections are added
           git push origin ${{ inputs.branch }}
 
       - name: Setup .NET SDK
@@ -120,12 +121,9 @@ jobs:
             NOTES=$(python3 -c "import json; print(json.load(open('update.json'))['updateMessage'])")
           fi
           
-          # Build release command
-          RELEASE_CMD="gh release create \"${{ steps.version.outputs.fork_version }}\" DnsServerPortable.tar.gz --title \"PiDoH ${{ steps.version.outputs.fork_version }}\" --notes \"$NOTES\""
-          
-          # Add --prerelease if forkBranch is dev
+          # Build arguments as array to avoid shell injection via eval
+          ARGS=("${{ steps.version.outputs.fork_version }}" DnsServerPortable.tar.gz --title "PiDoH ${{ steps.version.outputs.fork_version }}" --notes "$NOTES")
           if [ "${{ steps.version.outputs.fork_branch }}" = "dev" ]; then
-            RELEASE_CMD="$RELEASE_CMD --prerelease"
+            ARGS+=(--prerelease)
           fi
-          
-          eval $RELEASE_CMD
+          gh release create "${ARGS[@]}"
