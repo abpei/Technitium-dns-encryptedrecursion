@@ -164,9 +164,9 @@ function checkBlockListDomain() {
                     // Determine row highlighting: highlight the entry where the block/allow match occurred
                     var rowClass = "";
                     if (entry.isBlocked && !entry.isAllowed) {
-                        rowClass = " style=\"background-color: #f2dede;\"";  // light red background
+                        rowClass = " class=\"danger\"";
                     } else if (entry.isAllowed) {
-                        rowClass = " style=\"background-color: #dff0d8;\"";  // light green background
+                        rowClass = " class=\"success\"";
                     }
 
                     resultHtml += "<tr" + rowClass + ">";
