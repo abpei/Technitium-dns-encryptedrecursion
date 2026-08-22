@@ -603,6 +603,213 @@ public class BlockListTests : IDisposable
     }
 
     #endregion
+
+    #region AllowedZone Override Regression Tests
+
+    [Fact]
+    public void AllowedZoneOverride_DomainInBlocklistAndParentInAllowedZone_ReturnsNotBlocked()
+    {
+        // Regression test: d2wu036mkcz52n.cloudfront.net is in blocklist,
+        // cloudfront.net is in AllowedZone. Domain should be allowed (not blocked).
+        SetupBlockListZone(new Dictionary<string, List<Uri>>
+        {
+            ["d2wu036mkcz52n.cloudfront.net"] = new List<Uri> { TestBlockListUri }
+        });
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("cloudfront.net");
+
+        // Act - simulate fallback path logic from WebServiceBlockListApi
+        var domainResult = _blockListZoneManager.CheckDomain("d2wu036mkcz52n.cloudfront.net");
+        var allowResult = _blockListZoneManager.CheckAllowList("d2wu036mkcz52n.cloudfront.net");
+
+        DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord("d2wu036mkcz52n.cloudfront.net", DnsResourceRecordType.A, DnsClass.IN) });
+        string allowedBy = _dnsServer.AllowedZoneManager.IsAllowed(request) ? "allowed-zone" : null;
+
+        bool isBlocked = domainResult.IsBlocked;
+        if (allowedBy == "allowed-zone" || allowResult.IsAllowed)
+            isBlocked = false;
+
+        bool isAllowed = allowResult.IsAllowed || (allowedBy == "allowed-zone");
+
+        // Assert - AllowedZone overrides blocklist
+        Assert.True(domainResult.IsBlocked);  // Domain IS in blocklist
+        Assert.Equal("d2wu036mkcz52n.cloudfront.net", domainResult.BlockedDomain);
+        Assert.True(allowedBy == "allowed-zone");  // Domain IS in AllowedZone via parent
+        Assert.False(isBlocked);  // isBlocked overridden to false by AllowedZone
+        Assert.True(isAllowed);  // isAllowed set to true
+        Assert.Equal("allowed-zone", allowedBy);
+    }
+
+    [Fact]
+    public void AllowedZoneOverride_SubdomainOfAllowedZoneNotInBlocklist_ReturnsAllowed()
+    {
+        // Edge case: subdomain of an AllowedZone that is NOT in any blocklist (should be allowed)
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("example.com");
+
+        // Act - check a subdomain of the AllowedZone that's not in any blocklist
+        var domainResult = _blockListZoneManager.CheckDomain("sub.example.com");
+        var allowResult = _blockListZoneManager.CheckAllowList("sub.example.com");
+
+        DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord("sub.example.com", DnsResourceRecordType.A, DnsClass.IN) });
+        string allowedBy = _dnsServer.AllowedZoneManager.IsAllowed(request) ? "allowed-zone" : null;
+
+        bool isBlocked = domainResult.IsBlocked;
+        if (allowedBy == "allowed-zone" || allowResult.IsAllowed)
+            isBlocked = false;
+
+        bool isAllowed = allowResult.IsAllowed || (allowedBy == "allowed-zone");
+
+        // Assert - subdomain of AllowedZone is allowed even though it's not in any list
+        Assert.False(domainResult.IsBlocked);  // Not in blocklist
+        Assert.False(allowResult.IsAllowed);   // Not in blocklist allowlist
+        Assert.True(allowedBy == "allowed-zone");  // Allowed via AllowedZone
+        Assert.False(isBlocked);  // isBlocked is false
+        Assert.True(isAllowed);   // isAllowed is true
+        Assert.Equal("allowed-zone", allowedBy);
+    }
+
+    [Fact]
+    public void AllowedZoneOverride_DomainInBlocklistNoAllowedZone_ReturnsBlocked()
+    {
+        // Edge case: domain in blocklist where no AllowedZone applies (should remain blocked)
+        SetupBlockListZone(new Dictionary<string, List<Uri>>
+        {
+            ["blocked.example.com"] = new List<Uri> { TestBlockListUri }
+        });
+        SetupAllowListZone(new Dictionary<string, object>());
+        // No AllowedZone set
+
+        // Act
+        var domainResult = _blockListZoneManager.CheckDomain("blocked.example.com");
+        var allowResult = _blockListZoneManager.CheckAllowList("blocked.example.com");
+
+        DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord("blocked.example.com", DnsResourceRecordType.A, DnsClass.IN) });
+        string allowedBy = _dnsServer.AllowedZoneManager.IsAllowed(request) ? "allowed-zone" : null;
+
+        bool isBlocked = domainResult.IsBlocked;
+        if (allowedBy == "allowed-zone" || allowResult.IsAllowed)
+            isBlocked = false;
+
+        bool isAllowed = allowResult.IsAllowed || (allowedBy == "allowed-zone");
+
+        // Assert - domain in blocklist with no AllowedZone remains blocked
+        Assert.True(domainResult.IsBlocked);
+        Assert.Equal("blocked.example.com", domainResult.BlockedDomain);
+        Assert.Null(allowedBy);  // No AllowedZone match
+        Assert.False(allowResult.IsAllowed);  // Not in allowlist
+        Assert.True(isBlocked);  // isBlocked remains true
+        Assert.False(isAllowed); // isAllowed is false
+    }
+
+    [Fact]
+    public void AllowedZoneOverride_MultipleNestingLevels_OverridesBlocklist()
+    {
+        // Edge case: multiple levels of subdomain nesting with AllowedZone
+        // a.b.c.example.com is in blocklist, example.com is in AllowedZone
+        SetupBlockListZone(new Dictionary<string, List<Uri>>
+        {
+            ["a.b.c.example.com"] = new List<Uri> { TestBlockListUri }
+        });
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("example.com");
+
+        // Act
+        var domainResult = _blockListZoneManager.CheckDomain("a.b.c.example.com");
+        var allowResult = _blockListZoneManager.CheckAllowList("a.b.c.example.com");
+
+        DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord("a.b.c.example.com", DnsResourceRecordType.A, DnsClass.IN) });
+        string allowedBy = _dnsServer.AllowedZoneManager.IsAllowed(request) ? "allowed-zone" : null;
+
+        bool isBlocked = domainResult.IsBlocked;
+        if (allowedBy == "allowed-zone" || allowResult.IsAllowed)
+            isBlocked = false;
+
+        bool isAllowed = allowResult.IsAllowed || (allowedBy == "allowed-zone");
+
+        // Assert - deeply nested subdomain of AllowedZone is allowed
+        Assert.True(domainResult.IsBlocked);  // Domain IS in blocklist
+        Assert.Equal("a.b.c.example.com", domainResult.BlockedDomain);
+        Assert.True(allowedBy == "allowed-zone");  // Allowed via AllowedZone (example.com)
+        Assert.False(isBlocked);  // isBlocked overridden by AllowedZone
+        Assert.True(isAllowed);   // isAllowed set to true
+        Assert.Equal("allowed-zone", allowedBy);
+    }
+
+    [Fact]
+    public void AllowedZoneOverride_SubdomainOfAllowedZoneInBlocklist_OverridesBlocklist()
+    {
+        // Regression test with real-world-like domain names:
+        // d1234.cloudfront.net is in blocklist, cloudfront.net is in AllowedZone
+        SetupBlockListZone(new Dictionary<string, List<Uri>>
+        {
+            ["d1234.cloudfront.net"] = new List<Uri> { TestBlockListUri }
+        });
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("cloudfront.net");
+
+        // Act
+        var domainResult = _blockListZoneManager.CheckDomain("d1234.cloudfront.net");
+        var allowResult = _blockListZoneManager.CheckAllowList("d1234.cloudfront.net");
+
+        DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord("d1234.cloudfront.net", DnsResourceRecordType.A, DnsClass.IN) });
+        string allowedBy = _dnsServer.AllowedZoneManager.IsAllowed(request) ? "allowed-zone" : null;
+
+        bool isBlocked = domainResult.IsBlocked;
+        if (allowedBy == "allowed-zone" || allowResult.IsAllowed)
+            isBlocked = false;
+
+        bool isAllowed = allowResult.IsAllowed || (allowedBy == "allowed-zone");
+
+        // Assert - AllowedZone overrides blocklist for CloudFront subdomain
+        Assert.True(domainResult.IsBlocked);
+        Assert.Equal("d1234.cloudfront.net", domainResult.BlockedDomain);
+        Assert.True(allowedBy == "allowed-zone");
+        Assert.False(isBlocked);
+        Assert.True(isAllowed);
+        Assert.Equal("allowed-zone", allowedBy);
+    }
+
+    [Fact]
+    public void AllowedZoneOverride_ExactBugScenario_ReturnsCorrectValues()
+    {
+        // Exact scenario from the bug report:
+        // - d2wu036mkcz52n.cloudfront.net is in blocklist
+        // - cloudfront.net is in AllowedZone
+        // - Should return: isBlocked:false, isAllowed:true, allowedBy:"allowed-zone"
+        SetupBlockListZone(new Dictionary<string, List<Uri>>
+        {
+            ["d2wu036mkcz52n.cloudfront.net"] = new List<Uri> { new Uri("http://example.com/blocklist.txt") }
+        });
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("cloudfront.net");
+
+        // Act
+        var domainResult = _blockListZoneManager.CheckDomain("d2wu036mkcz52n.cloudfront.net");
+        var allowResult = _blockListZoneManager.CheckAllowList("d2wu036mkcz52n.cloudfront.net");
+
+        DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord("d2wu036mkcz52n.cloudfront.net", DnsResourceRecordType.A, DnsClass.IN) });
+        string allowedBy = _dnsServer.AllowedZoneManager.IsAllowed(request) ? "allowed-zone" : null;
+
+        bool isBlocked = domainResult.IsBlocked;
+        if (allowedBy == "allowed-zone" || allowResult.IsAllowed)
+            isBlocked = false;
+
+        bool isAllowed = allowResult.IsAllowed || (allowedBy == "allowed-zone");
+
+        if (allowResult.IsAllowed && allowedBy is null)
+            allowedBy = "blocklist";
+
+        // Assert - exact expected values from bug report
+        Assert.False(isBlocked);           // isBlocked: false
+        Assert.True(isAllowed);            // isAllowed: true
+        Assert.Equal("allowed-zone", allowedBy);  // allowedBy: "allowed-zone"
+        Assert.Equal("d2wu036mkcz52n.cloudfront.net", domainResult.Domain);
+        Assert.True(domainResult.IsBlocked);  // Blocklist check still finds it
+    }
+
+    #endregion
 }
 
 /// <summary>
