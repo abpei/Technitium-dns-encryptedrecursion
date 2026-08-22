@@ -175,10 +175,15 @@ namespace DnsServerCore
                     BlockListDomainCheckResult domainResult = manager.CheckDomain(domain);
                     BlockListAllowCheckResult allowResult = manager.CheckAllowList(domain);
 
-                    jsonWriter.WriteString("domain", domainResult.Domain);
-                    jsonWriter.WriteBoolean("isBlocked", domainResult.IsBlocked);
+                    // Apply AllowedZone or allowlist overrides to isBlocked
+                    bool ipIsBlocked = domainResult.IsBlocked;
+                    if (ipAllowedBy == "allowed-zone" || allowResult.IsAllowed)
+                        ipIsBlocked = false;
 
-                    if (domainResult.IsBlocked)
+                    jsonWriter.WriteString("domain", domainResult.Domain);
+                    jsonWriter.WriteBoolean("isBlocked", ipIsBlocked);
+
+                    if (ipIsBlocked)
                     {
                         jsonWriter.WriteString("matchedBlockedDomain", domainResult.BlockedDomain);
                         jsonWriter.WritePropertyName("blockListUrls");
@@ -190,7 +195,8 @@ namespace DnsServerCore
                         jsonWriter.WriteEndArray();
                     }
 
-                    jsonWriter.WriteBoolean("isAllowed", allowResult.IsAllowed);
+                    bool ipIsAllowed = allowResult.IsAllowed || (ipAllowedBy == "allowed-zone");
+                    jsonWriter.WriteBoolean("isAllowed", ipIsAllowed);
 
                     if (allowResult.IsAllowed)
                     {
