@@ -97,6 +97,15 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Build TechnitiumLibrary dependency
+        run: |
+          # Clone TechnitiumLibrary as sibling directory
+          cd ..
+          git clone https://github.com/TechnitiumSoftware/TechnitiumLibrary.git
+          cd TechnitiumLibrary
+          # Build the full solution (handles project dependencies automatically)
+          dotnet build TechnitiumLibrary.sln -c Release
+
       - name: Build
         run: dotnet publish DnsServerApp/DnsServerApp.csproj -c Release -o ./publish
 
