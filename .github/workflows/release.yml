@@ -103,8 +103,12 @@ jobs:
           cd ..
           git clone https://github.com/TechnitiumSoftware/TechnitiumLibrary.git
           cd TechnitiumLibrary
-          # Build the full solution (handles project dependencies automatically)
-          dotnet build TechnitiumLibrary.sln -c Release
+          # Build only the projects the fork needs, in dependency order
+          dotnet build TechnitiumLibrary/TechnitiumLibrary.csproj -c Release
+          dotnet build TechnitiumLibrary.ByteTree/TechnitiumLibrary.ByteTree.csproj -c Release
+          dotnet build TechnitiumLibrary.IO/TechnitiumLibrary.IO.csproj -c Release
+          dotnet build TechnitiumLibrary.Security.OTP/TechnitiumLibrary.Security.OTP.csproj -c Release
+          dotnet build TechnitiumLibrary.Net/TechnitiumLibrary.Net.csproj -c Release
 
       - name: Build
         run: dotnet publish DnsServerApp/DnsServerApp.csproj -c Release -o ./publish
