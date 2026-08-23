@@ -148,7 +148,14 @@ function checkBlockListDomain() {
                 resultHtml += "<div class=\"alert alert-success\" style=\"margin-bottom: 5px;\"><b>ALLOWED</b> — matched domain: " + htmlEncode(resp.matchedAllowedDomain);
                 if (allowedSource)
                     resultHtml += " (source: " + htmlEncode(allowedSource) + ")";
-                resultHtml += "<br/>Note: domain is in a block list (" + htmlEncode(resp.matchedBlockedDomain) + ") but the allow rule takes precedence.</div>";
+                resultHtml += "<br/>Note: domain is in a block list (" + htmlEncode(resp.matchedBlockedDomain) + ") but the allow rule takes precedence.<br/>Block list sources:";
+                if (resp.blockListUrls) {
+                    resultHtml += "<ul>";
+                    for (var i = 0; i < resp.blockListUrls.length; i++)
+                        resultHtml += "<li>" + htmlEncode(resp.blockListUrls[i]) + "</li>";
+                    resultHtml += "</ul>";
+                }
+                resultHtml += "</div>";
             } else if (resp.isBlocked) {
                 resultHtml += "<div class=\"alert alert-danger\" style=\"margin-bottom: 5px;\"><b>BLOCKED</b> — matched domain: " + htmlEncode(resp.matchedBlockedDomain) + "<br/>Block list sources:<ul>";
                 if (resp.blockListUrls) {
