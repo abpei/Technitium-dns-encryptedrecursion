@@ -1,7 +1,7 @@
 {
-    "updateVersion": "15.4.0-pidoh.3",
-    "updateTitle": "PiDoH Fork v15.4.0-pidoh.3 Available!",
+    "updateVersion": "15.4.0-pidoh.4",
+    "updateTitle": "PiDoH Fork v15.4.0-pidoh.4 Available!",
     "updateMessage": "isBlocked+isAllowed overlap fix, blocklist sources in ALLOWED banner, release workflow documentation.",
-    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh.3",
-    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh.3"
+    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh.4",
+    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh.4"
 }
