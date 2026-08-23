@@ -159,3 +159,49 @@ Make contribution to Technitium and help making new software, updates, and featu
 - [Technitium Blog: Technitium DNS Server v1.3 Released!](https://blog.technitium.com/2018/06/technitium-dns-server-v13-released.html) (Jun 2018)
 - [Technitium Blog: Running Technitium DNS Server on Ubuntu Linux](https://blog.technitium.com/2017/11/running-dns-server-on-ubuntu-linux.html) (Nov 2017)
 - [Technitium Blog: Technitium DNS Server Released!](https://blog.technitium.com/2017/11/technitium-dns-server-released.html) (Nov 2017)
+
+---
+
+## PiDoH Encrypted-Recursion Fork
+
+This is a fork of Technitium DNS Server maintained by the [PIDOH project](https://mapleham.ca). The fork adds features not available in upstream.
+
+### Fork Features
+
+| Feature | Description |
+|---------|-------------|
+| Fork version label | About page and logs show `PiDoH <version> (Technitium <upstream>)` via `fork.json` |
+| Configurable DoH landing page | Custom HTML served at the DoH root URL, configured via Settings |
+| Hardcoded update URL | Update mechanism points to fork's `update.json` on GitHub |
+| Block List Management tab | Web UI tab with per-URL download status, domain checker, allow/block list management |
+| CNAME chain resolution | Domain checker follows CNAME chains and checks each entry against blocklists and AllowedZone |
+| AllowedZone integration | Domain checker checks manual allowed zones and shows `allowedBy` source |
+| isBlocked + isAllowed overlap | When a domain is both blocked and allowed, UI shows ALLOWED banner with blocklist sources |
+| Download status tracking | Per-URL download status with last updated timestamp and error messages |
+| Loopback recursion exemption | Localhost queries bypass encrypted-only recursion requirement |
+
+### Version Convention
+
+Format: `v<major>.<minor>.<patch>-pidoh[-dev].<forkIncrement>`
+
+- `v15.4.0-pidoh.1` — stable release
+- `v15.4.0-pidoh-dev.29` — dev release (prerelease)
+
+### Installation
+
+```bash
+# Install latest dev release
+curl -sfL https://raw.githubusercontent.com/abpei/Technitium-dns-encryptedrecursion/master/install-fork.sh | sudo bash -s -- --dev
+
+# Install latest stable release
+curl -sfL https://raw.githubusercontent.com/abpei/Technitium-dns-encryptedrecursion/master/install-fork.sh | sudo bash -s -- --master
+```
+
+### Release Process
+
+Releases are automated via GitHub Actions. See [RELEASE.md](RELEASE.md) for full details.
+
+### Documentation
+
+- [RELEASE.md](RELEASE.md) — Release process and version convention
+- Obsidian vault: `Projects/PIDOH/PiDoH DNS Cluster/Technitium Fork/` — Project plan, implementation plan, node deployment
