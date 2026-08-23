@@ -1,7 +1,7 @@
 {
-    "updateVersion": "15.4.0-pidoh-dev.25",
-    "updateTitle": "PiDoH Fork v15.4.0-pidoh-dev.25 Available!",
-    "updateMessage": "Fix: AllowedZone/allowlist override applied to fallback path in BlockList API. Domain whitelists now correctly override blocked CNAME targets in all lookup paths.",
-    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh-dev.25",
-    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh-dev.25"
+    "updateVersion": "15.4.0-pidoh-dev.26",
+    "updateTitle": "PiDoH Fork v15.4.0-pidoh-dev.26 Available!",
+    "updateMessage": "Fix: Domain checker now shows both blocklist and AllowedZone status. isBlocked=true is preserved when AllowedZone overrides, so UI correctly displays both blocklist sources and ALLOWED banner.",
+    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh-dev.26",
+    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh-dev.26"
 }
