@@ -22,9 +22,11 @@ The release workflow (`.github/workflows/release.yml`) performs these steps:
 3. **Bump version** — Increments the 4th digit (fork increment) in the version string
 4. **Update metadata** — Writes the new version to both `fork.json` and `update.json`
 5. **Commit** — Pushes the version bump to the branch
-6. **Build** — Compiles with .NET 10 SDK (`dotnet publish`)
-7. **Package** — Creates `DnsServerPortable.tar.gz` from the build output
-8. **Release** — Creates a GitHub release with the version tag, attaches the tarball, and marks dev releases as pre-releases
+6. **Setup .NET SDK** — Installs .NET 10 SDK on the runner
+7. **Build TechnitiumLibrary** — Clones `TechnitiumSoftware/TechnitiumLibrary` as a sibling directory and builds the 5 required projects (TechnitiumLibrary, ByteTree, IO, Security.OTP, Net) in dependency order. The Firewall project is skipped (COM reference not supported on Linux).
+8. **Build** — Compiles the fork with `dotnet publish DnsServerApp/DnsServerApp.csproj -c Release`
+9. **Package** — Creates `DnsServerPortable.tar.gz` from the build output
+10. **Release** — Creates a GitHub release with the version tag, attaches the tarball, and marks dev releases as pre-releases
 
 ## Version Convention
 
@@ -39,7 +41,7 @@ Format: `v<major>.<minor>.<patch>-pidoh[-dev].<forkIncrement>`
 
 **Examples:**
 - `v15.4.0-pidoh.1` — First stable release for the v15.4.0 upstream base
-- `v15.4.0-pidoh-dev.16` — Sixteenth dev release for the v15.4.0 upstream base
+- `v15.4.0-pidoh-dev.29` — Latest dev release for the v15.4.0 upstream base
 
 ## fork.json and update.json
 
@@ -52,7 +54,7 @@ Tracks fork metadata and is included in the release tarball:
     "forkName": "PIDOH Encrypted-Recursion Fork",
     "forkShortName": "PiDoH",
     "forkBranch": "dev",
-    "forkVersion": "v15.4.0-pidoh-dev.16",
+    "forkVersion": "v15.4.0-pidoh-dev.29",
     "upstreamVersion": "15.4.0"
 }
 ```
@@ -71,11 +73,11 @@ Used by the DNS server's auto-update mechanism to notify users:
 
 ```json
 {
-    "updateVersion": "15.4.0-pidoh-dev.16",
-    "updateTitle": "PiDoH Fork v15.4.0-pidoh-dev.16 Available!",
-    "updateMessage": "Fix: CNAME chain allow/block determination now checks final target only.",
-    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh-dev.16",
-    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh-dev.16"
+    "updateVersion": "15.4.0-pidoh-dev.29",
+    "updateTitle": "PiDoH Fork v15.4.0-pidoh-dev.29 Available!",
+    "updateMessage": "Domain checker now shows both blocklist and AllowedZone status with blocklist sources in ALLOWED banner.",
+    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh-dev.29",
+    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh-dev.29"
 }
 ```
 
@@ -124,3 +126,19 @@ Each release produces:
 | GitHub Release | Tagged release with notes and download link |
 | Updated `fork.json` | Committed to the branch with the new version |
 | Updated `update.json` | Committed to the branch with update metadata |
+
+## Fork Features
+
+The following fork-specific features are included in all releases:
+
+| Feature | Description |
+|---------|-------------|
+| Fork version label | About page and logs show `PiDoH <version> (Technitium <upstream>)` via `fork.json` |
+| Configurable DoH landing page | Custom HTML served at the DoH root URL, configured via Settings |
+| Hardcoded update URL | Update mechanism points to fork's `update.json` on GitHub |
+| Block List Management tab | Web UI tab with per-URL download status, domain checker, allow/block list management |
+| CNAME chain resolution | Domain checker follows CNAME chains and checks each entry against blocklists and AllowedZone |
+| AllowedZone integration | Domain checker checks manual allowed zones (Settings > Other Zones > Allowed Zone) and shows `allowedBy` source |
+| isBlocked + isAllowed overlap | When a domain is both blocked and allowed, UI shows ALLOWED banner with blocklist sources listed |
+| Download status tracking | Per-URL download status (success/failed/skipped) with last updated timestamp and error messages |
+| Loopback recursion exemption | Localhost queries bypass encrypted-only recursion requirement |
