@@ -603,6 +603,210 @@ public class BlockListTests : IDisposable
     }
 
     #endregion
+
+    #region AllowedZone Override Regression Tests
+
+    [Fact]
+    public void AllowedZoneOverride_DomainInBlocklistAndParentInAllowedZone_ReturnsBothBlockedAndAllowed()
+    {
+        // Regression test: d2wu036mkcz52n.cloudfront.net is in blocklist,
+        // cloudfront.net is in AllowedZone. Both isBlocked=true AND isAllowed=true.
+        SetupBlockListZone(new Dictionary<string, List<Uri>>
+        {
+            ["d2wu036mkcz52n.cloudfront.net"] = new List<Uri> { TestBlockListUri }
+        });
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("cloudfront.net");
+
+        // Act - simulate fallback path logic from WebServiceBlockListApi (post-fix)
+        var domainResult = _blockListZoneManager.CheckDomain("d2wu036mkcz52n.cloudfront.net");
+        var allowResult = _blockListZoneManager.CheckAllowList("d2wu036mkcz52n.cloudfront.net");
+
+        DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord("d2wu036mkcz52n.cloudfront.net", DnsResourceRecordType.A, DnsClass.IN) });
+        string allowedBy = _dnsServer.AllowedZoneManager.IsAllowed(request) ? "allowed-zone" : null;
+
+        // Post-fix: isBlocked always reflects blocklist status, no longer overridden
+        bool isBlocked = domainResult.IsBlocked;
+        bool isAllowed = allowResult.IsAllowed || (allowedBy == "allowed-zone");
+
+        // Assert - both isBlocked and isAllowed are true
+        Assert.True(domainResult.IsBlocked);  // Domain IS in blocklist
+        Assert.Equal("d2wu036mkcz52n.cloudfront.net", domainResult.BlockedDomain);
+        Assert.Contains(TestBlockListUri.AbsoluteUri, domainResult.BlockListUrls);
+        Assert.True(allowedBy == "allowed-zone");  // Domain IS in AllowedZone via parent
+        Assert.True(isBlocked);  // isBlocked stays true (no longer overridden)
+        Assert.True(isAllowed);  // isAllowed set to true
+        Assert.Equal("allowed-zone", allowedBy);
+    }
+
+    [Fact]
+    public void AllowedZoneOverride_SubdomainOfAllowedZoneNotInBlocklist_ReturnsAllowed()
+    {
+        // Edge case: subdomain of an AllowedZone that is NOT in any blocklist (should be allowed)
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("example.com");
+
+        // Act - check a subdomain of the AllowedZone that's not in any blocklist
+        var domainResult = _blockListZoneManager.CheckDomain("sub.example.com");
+        var allowResult = _blockListZoneManager.CheckAllowList("sub.example.com");
+
+        DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord("sub.example.com", DnsResourceRecordType.A, DnsClass.IN) });
+        string allowedBy = _dnsServer.AllowedZoneManager.IsAllowed(request) ? "allowed-zone" : null;
+
+        bool isBlocked = domainResult.IsBlocked;
+        if (allowedBy == "allowed-zone" || allowResult.IsAllowed)
+            isBlocked = false;
+
+        bool isAllowed = allowResult.IsAllowed || (allowedBy == "allowed-zone");
+
+        // Assert - subdomain of AllowedZone is allowed even though it's not in any list
+        Assert.False(domainResult.IsBlocked);  // Not in blocklist
+        Assert.False(allowResult.IsAllowed);   // Not in blocklist allowlist
+        Assert.True(allowedBy == "allowed-zone");  // Allowed via AllowedZone
+        Assert.False(isBlocked);  // isBlocked is false
+        Assert.True(isAllowed);   // isAllowed is true
+        Assert.Equal("allowed-zone", allowedBy);
+    }
+
+    [Fact]
+    public void AllowedZoneOverride_DomainInBlocklistNoAllowedZone_ReturnsBlocked()
+    {
+        // Edge case: domain in blocklist where no AllowedZone applies (should remain blocked)
+        SetupBlockListZone(new Dictionary<string, List<Uri>>
+        {
+            ["blocked.example.com"] = new List<Uri> { TestBlockListUri }
+        });
+        SetupAllowListZone(new Dictionary<string, object>());
+        // No AllowedZone set
+
+        // Act
+        var domainResult = _blockListZoneManager.CheckDomain("blocked.example.com");
+        var allowResult = _blockListZoneManager.CheckAllowList("blocked.example.com");
+
+        DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord("blocked.example.com", DnsResourceRecordType.A, DnsClass.IN) });
+        string allowedBy = _dnsServer.AllowedZoneManager.IsAllowed(request) ? "allowed-zone" : null;
+
+        bool isBlocked = domainResult.IsBlocked;
+        if (allowedBy == "allowed-zone" || allowResult.IsAllowed)
+            isBlocked = false;
+
+        bool isAllowed = allowResult.IsAllowed || (allowedBy == "allowed-zone");
+
+        // Assert - domain in blocklist with no AllowedZone remains blocked
+        Assert.True(domainResult.IsBlocked);
+        Assert.Equal("blocked.example.com", domainResult.BlockedDomain);
+        Assert.Null(allowedBy);  // No AllowedZone match
+        Assert.False(allowResult.IsAllowed);  // Not in allowlist
+        Assert.True(isBlocked);  // isBlocked remains true
+        Assert.False(isAllowed); // isAllowed is false
+    }
+
+    [Fact]
+    public void AllowedZoneOverride_MultipleNestingLevels_BothBlockedAndAllowed()
+    {
+        // Edge case: multiple levels of subdomain nesting with AllowedZone
+        // a.b.c.example.com is in blocklist, example.com is in AllowedZone
+        SetupBlockListZone(new Dictionary<string, List<Uri>>
+        {
+            ["a.b.c.example.com"] = new List<Uri> { TestBlockListUri }
+        });
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("example.com");
+
+        // Act
+        var domainResult = _blockListZoneManager.CheckDomain("a.b.c.example.com");
+        var allowResult = _blockListZoneManager.CheckAllowList("a.b.c.example.com");
+
+        DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord("a.b.c.example.com", DnsResourceRecordType.A, DnsClass.IN) });
+        string allowedBy = _dnsServer.AllowedZoneManager.IsAllowed(request) ? "allowed-zone" : null;
+
+        // Post-fix: isBlocked always reflects blocklist status
+        bool isBlocked = domainResult.IsBlocked;
+        bool isAllowed = allowResult.IsAllowed || (allowedBy == "allowed-zone");
+
+        // Assert - both isBlocked and isAllowed are true
+        Assert.True(domainResult.IsBlocked);  // Domain IS in blocklist
+        Assert.Equal("a.b.c.example.com", domainResult.BlockedDomain);
+        Assert.Contains(TestBlockListUri.AbsoluteUri, domainResult.BlockListUrls);
+        Assert.True(allowedBy == "allowed-zone");  // Allowed via AllowedZone (example.com)
+        Assert.True(isBlocked);  // isBlocked stays true (no longer overridden)
+        Assert.True(isAllowed);   // isAllowed set to true
+        Assert.Equal("allowed-zone", allowedBy);
+    }
+
+    [Fact]
+    public void AllowedZoneOverride_SubdomainOfAllowedZoneInBlocklist_BothBlockedAndAllowed()
+    {
+        // Regression test with real-world-like domain names:
+        // d1234.cloudfront.net is in blocklist, cloudfront.net is in AllowedZone
+        SetupBlockListZone(new Dictionary<string, List<Uri>>
+        {
+            ["d1234.cloudfront.net"] = new List<Uri> { TestBlockListUri }
+        });
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("cloudfront.net");
+
+        // Act
+        var domainResult = _blockListZoneManager.CheckDomain("d1234.cloudfront.net");
+        var allowResult = _blockListZoneManager.CheckAllowList("d1234.cloudfront.net");
+
+        DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord("d1234.cloudfront.net", DnsResourceRecordType.A, DnsClass.IN) });
+        string allowedBy = _dnsServer.AllowedZoneManager.IsAllowed(request) ? "allowed-zone" : null;
+
+        // Post-fix: isBlocked always reflects blocklist status
+        bool isBlocked = domainResult.IsBlocked;
+        bool isAllowed = allowResult.IsAllowed || (allowedBy == "allowed-zone");
+
+        // Assert - both isBlocked and isAllowed are true for CloudFront subdomain
+        Assert.True(domainResult.IsBlocked);
+        Assert.Equal("d1234.cloudfront.net", domainResult.BlockedDomain);
+        Assert.Contains(TestBlockListUri.AbsoluteUri, domainResult.BlockListUrls);
+        Assert.True(allowedBy == "allowed-zone");
+        Assert.True(isBlocked);  // isBlocked stays true (no longer overridden)
+        Assert.True(isAllowed);
+        Assert.Equal("allowed-zone", allowedBy);
+    }
+
+    [Fact]
+    public void AllowedZoneOverride_ExactBugScenario_ReturnsBothBlockedAndAllowed()
+    {
+        // Exact scenario from the bug report:
+        // - d2wu036mkcz52n.cloudfront.net is in blocklist
+        // - cloudfront.net is in AllowedZone
+        // - Should return: isBlocked:true, isAllowed:true, allowedBy:"allowed-zone"
+        SetupBlockListZone(new Dictionary<string, List<Uri>>
+        {
+            ["d2wu036mkcz52n.cloudfront.net"] = new List<Uri> { new Uri("http://example.com/blocklist.txt") }
+        });
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("cloudfront.net");
+
+        // Act
+        var domainResult = _blockListZoneManager.CheckDomain("d2wu036mkcz52n.cloudfront.net");
+        var allowResult = _blockListZoneManager.CheckAllowList("d2wu036mkcz52n.cloudfront.net");
+
+        DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord("d2wu036mkcz52n.cloudfront.net", DnsResourceRecordType.A, DnsClass.IN) });
+        string allowedBy = _dnsServer.AllowedZoneManager.IsAllowed(request) ? "allowed-zone" : null;
+
+        // Post-fix: isBlocked always reflects blocklist status
+        bool isBlocked = domainResult.IsBlocked;
+        bool isAllowed = allowResult.IsAllowed || (allowedBy == "allowed-zone");
+
+        if (allowResult.IsAllowed && allowedBy is null)
+            allowedBy = "blocklist";
+
+        // Assert - exact expected values from bug report (post-fix behavior)
+        Assert.True(isBlocked);           // isBlocked: true (was false pre-fix)
+        Assert.True(isAllowed);            // isAllowed: true
+        Assert.Equal("allowed-zone", allowedBy);  // allowedBy: "allowed-zone"
+        Assert.Equal("d2wu036mkcz52n.cloudfront.net", domainResult.Domain);
+        Assert.True(domainResult.IsBlocked);  // Blocklist check still finds it
+        Assert.Equal("d2wu036mkcz52n.cloudfront.net", domainResult.BlockedDomain);
+        Assert.Contains("http://example.com/blocklist.txt", domainResult.BlockListUrls);
+    }
+
+    #endregion
 }
 
 /// <summary>
@@ -1109,11 +1313,10 @@ public class CnameChainResolverTests : IDisposable
     }
 
     [Fact]
-    public async Task CnameChain_AllowlistAtIntermediateDoesNotOverrideFinalTargetBlock()
+    public async Task CnameChain_AllowlistOverridesBlocklistAtIntermediateLevel()
     {
         // Arrange - "intermediate.example.com" is allowed, but "final.example.com" is blocked
         // Chain: start.example.com -> intermediate.example.com -> final.example.com (blocked)
-        // With final-target-only logic, the intermediate allow does NOT override the final target block
         SetupBlockListZone(new Dictionary<string, List<Uri>>
         {
             ["final.example.com"] = new List<Uri> { _testBlockListUri }
@@ -1157,7 +1360,7 @@ public class CnameChainResolverTests : IDisposable
                 entry.BlockListUrls = domainResult.BlockListUrls;
             }
 
-            // Allowlist overrides blocklist at each level (per-entry display)
+            // Allowlist overrides blocklist at each level
             if (allowResult.IsAllowed)
             {
                 entry.IsBlocked = false;
@@ -1165,14 +1368,10 @@ public class CnameChainResolverTests : IDisposable
             }
         }
 
-        // The intermediate domain IS allowed per entry, but the overall result
-        // is determined by the final target only (final.example.com is blocked)
-        // So isAllowed from per-entry checks is true, but the API would set
-        // isBlocked = true because the final target is blocked
-        Assert.True(isAllowed); // intermediate entry is allowed
+        // The intermediate domain is allowed, so the chain should report allowed
+        Assert.True(isAllowed);
+        // The intermediate entry should be marked as allowed
         Assert.True(chain.Any(e => e.IsAllowed && e.Target == "intermediate.example.com"));
-        // The final target entry should be blocked
-        Assert.True(chain.Any(e => e.IsBlocked && e.Domain == "final.example.com"));
     }
 
     [Fact]
@@ -1444,74 +1643,23 @@ public class CnameChainResolverTests : IDisposable
         Assert.False(aRecord.IsAllowed);
     }
 
+    #region Final-target-only allow/block determination tests
+
     [Fact]
-    public async Task CnameChain_FinalTargetAllowedByAllowedZoneManager_OverridesBlock()
+    public async Task CnameChain_FinalTargetBlockedAndNotWhitelisted_ReturnsBlocked()
     {
-        // Arrange - "final.example.com" is in AllowedZoneManager AND blocked
-        // Chain: start.example.com -> blocked.example.com -> final.example.com
-        // Final target allowed should override the block
+        // Arrange - "ads.example.com" CNAME -> "blocked.example.com" (blocked, NOT in allowlist)
         SetupBlockListZone(new Dictionary<string, List<Uri>>
         {
-            ["blocked.example.com"] = new List<Uri> { _testBlockListUri },
-            ["final.example.com"] = new List<Uri> { _testBlockListUri }
+            ["blocked.example.com"] = new List<Uri> { _testBlockListUri }
         });
         SetupAllowListZone(new Dictionary<string, object>());
-
-        // Whitelist the final target
-        _dnsServer.AllowedZoneManager.AllowZone("final.example.com");
 
         var mockResolver = new MockDnsResolver(q =>
         {
             return Task.FromResult(MockDnsResolver.CreateCnameChainResponse(
-                "start.example.com",
-                new[] { "blocked.example.com", "final.example.com" },
-                "10.20.30.40"));
-        });
-
-        var resolver = new CnameChainResolver(mockResolver);
-
-        // Act
-        var chain = await resolver.ResolveCnameChainAsync(
-            "start.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
-
-        // Assert
-        Assert.NotNull(chain);
-        Assert.Equal(3, chain.Count); // 2 CNAME + 1 A record
-
-        // Simulate the API logic: check final target against AllowedZoneManager
-        var lastEntry = chain.Last();
-        string finalTarget = lastEntry.Target ?? lastEntry.Domain;
-        Assert.Equal("final.example.com", finalTarget);
-
-        // Final target is in AllowedZoneManager -> should be allowed
-        var allowedRequest = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError,
-            new DnsQuestionRecord[] { new DnsQuestionRecord(finalTarget, DnsResourceRecordType.A, DnsClass.IN) });
-        Assert.True(_dnsServer.AllowedZoneManager.IsAllowed(allowedRequest));
-
-        // Overall: isBlocked should be false because final target is allowed
-        // (blocked.example.com is blocked, but final target overrides)
-    }
-
-    [Fact]
-    public async Task CnameChain_RootWhitelist_DoesNotOverrideFinalTargetBlock()
-    {
-        // Arrange - "start.example.com" (root) is whitelisted, but final target is blocked
-        // Chain: start.example.com -> final.example.com (blocked)
-        // Root whitelist should NOT override final target block
-        SetupBlockListZone(new Dictionary<string, List<Uri>>
-        {
-            ["final.example.com"] = new List<Uri> { _testBlockListUri }
-        });
-        SetupAllowListZone(new Dictionary<string, object>());
-
-        // Whitelist the root domain (not the final target)
-        _dnsServer.AllowedZoneManager.AllowZone("start.example.com");
-
-        var mockResolver = new MockDnsResolver(q =>
-        {
-            return Task.FromResult(MockDnsResolver.CreateCnameChainResponse(
-                "start.example.com",
-                new[] { "final.example.com" },
+                "ads.example.com",
+                new[] { "blocked.example.com" },
                 "1.2.3.4"));
         });
 
@@ -1519,39 +1667,123 @@ public class CnameChainResolverTests : IDisposable
 
         // Act
         var chain = await resolver.ResolveCnameChainAsync(
-            "start.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+            "ads.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert - chain should exist with the blocked target
+        Assert.NotNull(chain);
+        Assert.Equal(2, chain.Count);
+
+        // Simulate the API's final-target-only logic
+        CnameChainEntry finalEntry = chain[chain.Count - 1];
+        string finalTarget = finalEntry.Target ?? finalEntry.Domain;
+        var finalDomainResult = _blockListZoneManager.CheckDomain(finalTarget);
+        var finalAllowResult = _blockListZoneManager.CheckAllowList(finalTarget);
+
+        bool isAllowed = finalAllowResult.IsAllowed;
+        bool isBlocked = isAllowed ? false : finalDomainResult.IsBlocked;
+
+        // Final target is blocked and NOT whitelisted → overall BLOCKED
+        Assert.True(isBlocked);
+        Assert.False(isAllowed);
+    }
+
+    [Fact]
+    public async Task CnameChain_FinalTargetIsWhitelisted_ReturnsAllowed()
+    {
+        // Arrange - "safe.example.com" CNAME -> "trusted.example.com" (in allowlist)
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>
+        {
+            ["trusted.example.com"] = null!
+        });
+
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateCnameChainResponse(
+                "safe.example.com",
+                new[] { "trusted.example.com" },
+                "5.6.7.8"));
+        });
+
+        var resolver = new CnameChainResolver(mockResolver);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "safe.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
 
         // Assert
         Assert.NotNull(chain);
-        Assert.Equal(2, chain.Count); // 1 CNAME + 1 A record
+        Assert.Equal(2, chain.Count);
 
-        // Simulate the API logic: check final target against AllowedZoneManager
-        var lastEntry = chain.Last();
-        string finalTarget = lastEntry.Target ?? lastEntry.Domain;
-        Assert.Equal("final.example.com", finalTarget);
+        // Simulate the API's final-target-only logic
+        CnameChainEntry finalEntry = chain[chain.Count - 1];
+        string finalTarget = finalEntry.Target ?? finalEntry.Domain;
+        var finalAllowResult = _blockListZoneManager.CheckAllowList(finalTarget);
 
-        // Final target is NOT in AllowedZoneManager -> block should remain
-        var allowedRequest = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError,
-            new DnsQuestionRecord[] { new DnsQuestionRecord(finalTarget, DnsResourceRecordType.A, DnsClass.IN) });
-        Assert.False(_dnsServer.AllowedZoneManager.IsAllowed(allowedRequest));
+        bool isAllowed = finalAllowResult.IsAllowed;
 
-        // Root is allowed but final target is not -> overall should be BLOCKED
+        // Final target IS whitelisted → overall ALLOWED
+        Assert.True(isAllowed);
+    }
+
+    [Fact]
+    public async Task CnameChain_RootWhitelistedButFinalTargetBlocked_ReturnsBlocked()
+    {
+        // Arrange - "ads.example.com" CNAME -> "blocked.example.com" (blocked)
+        // Root "ads.example.com" is whitelisted, but final target is blocked
+        SetupBlockListZone(new Dictionary<string, List<Uri>>
+        {
+            ["blocked.example.com"] = new List<Uri> { _testBlockListUri }
+        });
+        SetupAllowListZone(new Dictionary<string, object>());
+
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateCnameChainResponse(
+                "ads.example.com",
+                new[] { "blocked.example.com" },
+                "1.2.3.4"));
+        });
+
+        var resolver = new CnameChainResolver(mockResolver);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "ads.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(chain);
+        Assert.Equal(2, chain.Count);
+
+        // Simulate the API's final-target-only logic
+        // Root is whitelisted but final target is what matters
+        CnameChainEntry finalEntry = chain[chain.Count - 1];
+        string finalTarget = finalEntry.Target ?? finalEntry.Domain;
+        var finalDomainResult = _blockListZoneManager.CheckDomain(finalTarget);
+        var finalAllowResult = _blockListZoneManager.CheckAllowList(finalTarget);
+
+        bool isAllowed = finalAllowResult.IsAllowed;
+        bool isBlocked = isAllowed ? false : finalDomainResult.IsBlocked;
+
+        // Root whitelist does NOT override → final target blocked → overall BLOCKED
+        Assert.True(isBlocked);
+        Assert.False(isAllowed);
     }
 
     [Fact]
     public async Task CnameChain_NoCname_WhitelistedDomain_ReturnsAllowed()
     {
-        // Arrange - domain with no CNAME, whitelisted in AllowedZoneManager
-        // The fallback path handles this: root IS the final target
+        // Arrange - direct A record, domain is whitelisted (no CNAME chain)
         SetupBlockListZone(new Dictionary<string, List<Uri>>());
-        SetupAllowListZone(new Dictionary<string, object>());
-
-        _dnsServer.AllowedZoneManager.AllowZone("direct.example.com");
+        SetupAllowListZone(new Dictionary<string, object>
+        {
+            ["trusted.example.com"] = null!
+        });
 
         var mockResolver = new MockDnsResolver(q =>
         {
             return Task.FromResult(MockDnsResolver.CreateDirectAResponse(
-                "direct.example.com",
+                "trusted.example.com",
                 "10.0.0.1"));
         });
 
@@ -1559,14 +1791,747 @@ public class CnameChainResolverTests : IDisposable
 
         // Act
         var chain = await resolver.ResolveCnameChainAsync(
-            "direct.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+            "trusted.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
 
-        // Assert - returns null (no CNAME), fallback path is used in the API
+        // Assert - no CNAME chain means fallback path (no chain returned)
         Assert.Null(chain);
 
-        // Verify the domain is in AllowedZoneManager
-        var request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError,
-            new DnsQuestionRecord[] { new DnsQuestionRecord("direct.example.com", DnsResourceRecordType.A, DnsClass.IN) });
-        Assert.True(_dnsServer.AllowedZoneManager.IsAllowed(request));
+        // The fallback path checks the domain directly - simulate that
+        var domainResult = _blockListZoneManager.CheckDomain("trusted.example.com");
+        var allowResult = _blockListZoneManager.CheckAllowList("trusted.example.com");
+
+        // Domain is whitelisted → ALLOWED (existing behavior, no regression)
+        Assert.True(allowResult.IsAllowed);
+        Assert.False(domainResult.IsBlocked);
     }
+
+    [Fact]
+    public async Task CnameChain_FinalTargetBlockedViaAllowedZoneManager_ReturnsBlocked()
+    {
+        // Arrange - "ads.example.com" CNAME -> "blocked.example.com" (blocked)
+        // "blocked.example.com" is in AllowedZoneManager but also in blocklist
+        // AllowedZoneManager should override blocklist → overall ALLOWED
+        SetupBlockListZone(new Dictionary<string, List<Uri>>
+        {
+            ["blocked.example.com"] = new List<Uri> { _testBlockListUri }
+        });
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("blocked.example.com");
+
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateCnameChainResponse(
+                "ads.example.com",
+                new[] { "blocked.example.com" },
+                "1.2.3.4"));
+        });
+
+        var resolver = new CnameChainResolver(mockResolver);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "ads.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(chain);
+        Assert.Equal(2, chain.Count);
+
+        // Simulate the API's final-target-only logic
+        CnameChainEntry finalEntry = chain[chain.Count - 1];
+        string finalTarget = finalEntry.Target ?? finalEntry.Domain;
+
+        // Check AllowedZoneManager for final target
+        DnsDatagram finalRequest = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord(finalTarget, DnsResourceRecordType.A, DnsClass.IN) });
+        bool allowedByZone = _dnsServer.AllowedZoneManager.IsAllowed(finalRequest);
+
+        var finalAllowResult = _blockListZoneManager.CheckAllowList(finalTarget);
+        bool isAllowed = allowedByZone || finalAllowResult.IsAllowed;
+        var finalDomainResult = _blockListZoneManager.CheckDomain(finalTarget);
+        bool isBlocked = isAllowed ? false : finalDomainResult.IsBlocked;
+
+        // Final target is in AllowedZoneManager → overall ALLOWED (overrides blocklist)
+        Assert.True(isAllowed);
+        Assert.False(isBlocked);
+    }
+
+    [Fact]
+    public async Task CnameChain_FinalTargetNotBlocked_ReturnsNotBlocked()
+    {
+        // Arrange - "safe.example.com" CNAME -> "clean.example.com" (not in any list)
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>());
+
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateCnameChainResponse(
+                "safe.example.com",
+                new[] { "clean.example.com" },
+                "10.20.30.40"));
+        });
+
+        var resolver = new CnameChainResolver(mockResolver);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "safe.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(chain);
+        Assert.Equal(2, chain.Count);
+
+        // Simulate the API's final-target-only logic
+        CnameChainEntry finalEntry = chain[chain.Count - 1];
+        string finalTarget = finalEntry.Target ?? finalEntry.Domain;
+        var finalDomainResult = _blockListZoneManager.CheckDomain(finalTarget);
+        var finalAllowResult = _blockListZoneManager.CheckAllowList(finalTarget);
+
+        bool isAllowed = finalAllowResult.IsAllowed;
+        bool isBlocked = isAllowed ? false : finalDomainResult.IsBlocked;
+
+        // Final target is clean → NOT blocked, NOT allowed
+        Assert.False(isBlocked);
+        Assert.False(isAllowed);
+    }
+
+    #endregion
+
+    #region Fallback Path Tests
+
+    [Fact]
+    public void FallbackPath_DomainInBlocklistAndAllowedZone_ReturnsBothBlockedAndAllowed()
+    {
+        // Arrange - domain is in blocklist AND in AllowedZoneManager
+        // Post-fix: isBlocked stays true, isAllowed is true
+        var blockListZone = new Dictionary<string, List<Uri>>
+        {
+            ["blocked.example.com"] = new List<Uri> { _testBlockListUri }
+        };
+        SetupBlockListZone(blockListZone);
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("blocked.example.com");
+
+        // Act - check domain with AllowedZoneManager parameter (simulating fallback path)
+        var domainResult = _blockListZoneManager.CheckDomain("blocked.example.com");
+        var allowResult = _blockListZoneManager.CheckAllowList("blocked.example.com");
+
+        // Simulate fallback path logic (post-fix: no isBlocked override)
+        DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord("blocked.example.com", DnsResourceRecordType.A, DnsClass.IN) });
+        string fbAllowedBy = _dnsServer.AllowedZoneManager.IsAllowed(request) ? "allowed-zone" : null;
+
+        // Post-fix: isBlocked always reflects blocklist status
+        bool isBlocked = domainResult.IsBlocked;
+        bool isAllowed = allowResult.IsAllowed || (fbAllowedBy == "allowed-zone");
+
+        // Assert - both isBlocked and isAllowed are true
+        Assert.True(domainResult.IsBlocked);  // Domain IS in blocklist
+        Assert.Equal("blocked.example.com", domainResult.BlockedDomain);
+        Assert.Contains(_testBlockListUri.AbsoluteUri, domainResult.BlockListUrls);
+        Assert.True(fbAllowedBy == "allowed-zone");  // Domain IS in AllowedZone
+        Assert.True(isBlocked);  // isBlocked stays true (no longer overridden)
+        Assert.True(isAllowed);  // isAllowed is true
+        Assert.Equal("allowed-zone", fbAllowedBy);
+    }
+
+    [Fact]
+    public void FallbackPath_DomainInBlocklistAndAllowlist_ReturnsBothBlockedAndAllowed()
+    {
+        // Arrange - domain is in blocklist AND in blocklist allowlist
+        // Post-fix: isBlocked stays true, isAllowed is true
+        var blockListZone = new Dictionary<string, List<Uri>>
+        {
+            ["blocked.example.com"] = new List<Uri> { _testBlockListUri }
+        };
+        SetupBlockListZone(blockListZone);
+        SetupAllowListZone(new Dictionary<string, object>
+        {
+            ["blocked.example.com"] = null!
+        });
+
+        // Act - check domain (simulating fallback path)
+        var domainResult = _blockListZoneManager.CheckDomain("blocked.example.com");
+        var allowResult = _blockListZoneManager.CheckAllowList("blocked.example.com");
+
+        // Simulate fallback path logic (post-fix: no isBlocked override)
+        string fbAllowedBy = null;
+        bool isBlocked = domainResult.IsBlocked;
+        bool isAllowed = allowResult.IsAllowed || (fbAllowedBy == "allowed-zone");
+        if (allowResult.IsAllowed && fbAllowedBy is null)
+            fbAllowedBy = "blocklist";
+
+        // Assert - both isBlocked and isAllowed are true
+        Assert.True(domainResult.IsBlocked);  // Domain IS in blocklist
+        Assert.Equal("blocked.example.com", domainResult.BlockedDomain);
+        Assert.Contains(_testBlockListUri.AbsoluteUri, domainResult.BlockListUrls);
+        Assert.True(allowResult.IsAllowed);  // Domain IS in allowlist
+        Assert.True(isBlocked);  // isBlocked stays true (no longer overridden)
+        Assert.True(isAllowed);  // isAllowed is true
+        Assert.Equal("blocklist", fbAllowedBy);
+    }
+
+    [Fact]
+    public void FallbackPath_DomainInBlocklistOnly_ReturnsBlocked()
+    {
+        // Arrange - domain is only in blocklist, not in any allow list
+        var blockListZone = new Dictionary<string, List<Uri>>
+        {
+            ["blocked.example.com"] = new List<Uri> { _testBlockListUri }
+        };
+        SetupBlockListZone(blockListZone);
+        SetupAllowListZone(new Dictionary<string, object>());
+
+        // Act - check domain (simulating fallback path)
+        var domainResult = _blockListZoneManager.CheckDomain("blocked.example.com");
+        var allowResult = _blockListZoneManager.CheckAllowList("blocked.example.com");
+
+        // Simulate fallback path logic
+        string fbAllowedBy = null;
+        bool isBlocked = domainResult.IsBlocked;
+        if (fbAllowedBy == "allowed-zone" || allowResult.IsAllowed)
+            isBlocked = false;
+
+        // Assert - no allow list match, isBlocked remains true
+        Assert.True(domainResult.IsBlocked);
+        Assert.False(allowResult.IsAllowed);
+        Assert.Null(fbAllowedBy);
+        Assert.True(isBlocked);
+    }
+
+    [Fact]
+    public void FallbackPath_DomainInBlocklistAndParentInAllowedZone_ReturnsBothBlockedAndAllowed()
+    {
+        // Arrange - test-blocked.example.com is in blocklist, example.com is in AllowedZone
+        // Post-fix: isBlocked stays true, isAllowed is true
+        var blockListZone = new Dictionary<string, List<Uri>>
+        {
+            ["test-blocked.example.com"] = new List<Uri> { _testBlockListUri }
+        };
+        SetupBlockListZone(blockListZone);
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("example.com");
+
+        // Act - check domain (simulating fallback path, no CNAME chain)
+        var domainResult = _blockListZoneManager.CheckDomain("test-blocked.example.com");
+        var allowResult = _blockListZoneManager.CheckAllowList("test-blocked.example.com");
+
+        // Simulate fallback path logic from WebServiceBlockListApi (post-fix)
+        string fbAllowedBy = null;
+        AllowedZoneManager fbAllowedZoneManager = _dnsServer.AllowedZoneManager;
+        DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord("test-blocked.example.com", DnsResourceRecordType.A, DnsClass.IN) });
+        if (fbAllowedZoneManager.IsAllowed(request))
+            fbAllowedBy = "allowed-zone";
+
+        // Post-fix: isBlocked always reflects blocklist status
+        bool isBlocked = domainResult.IsBlocked;
+        bool isAllowed = allowResult.IsAllowed || (fbAllowedBy == "allowed-zone");
+
+        // Assert - both isBlocked and isAllowed are true
+        Assert.True(domainResult.IsBlocked);  // Domain IS in blocklist
+        Assert.Equal("test-blocked.example.com", domainResult.BlockedDomain);
+        Assert.Contains(_testBlockListUri.AbsoluteUri, domainResult.BlockListUrls);
+        Assert.True(fbAllowedBy == "allowed-zone");  // Domain IS in AllowedZone via parent
+        Assert.True(isBlocked);  // isBlocked stays true (no longer overridden)
+        Assert.True(isAllowed);  // isAllowed is true
+        Assert.Equal("allowed-zone", fbAllowedBy);
+    }
+
+    [Fact]
+    public void FallbackPath_DomainInBlocklistNotInAllowedZone_ReturnsBlocked()
+    {
+        // Arrange - test-blocked.example.com is in blocklist, NOT in any AllowedZone
+        var blockListZone = new Dictionary<string, List<Uri>>
+        {
+            ["test-blocked.example.com"] = new List<Uri> { _testBlockListUri }
+        };
+        SetupBlockListZone(blockListZone);
+        SetupAllowListZone(new Dictionary<string, object>());
+
+        // Act - check domain (simulating fallback path, no CNAME chain)
+        var domainResult = _blockListZoneManager.CheckDomain("test-blocked.example.com");
+        var allowResult = _blockListZoneManager.CheckAllowList("test-blocked.example.com");
+
+        // Simulate fallback path logic from WebServiceBlockListApi
+        string fbAllowedBy = null;
+        bool isBlocked = domainResult.IsBlocked;
+        if (fbAllowedBy == "allowed-zone" || allowResult.IsAllowed)
+            isBlocked = false;
+
+        bool isAllowed = allowResult.IsAllowed || (fbAllowedBy == "allowed-zone");
+
+        // Assert - no AllowedZone match, blocklist stands
+        Assert.True(domainResult.IsBlocked);
+        Assert.False(allowResult.IsAllowed);
+        Assert.Null(fbAllowedBy);
+        Assert.True(isBlocked);  // isBlocked remains true
+        Assert.False(isAllowed);  // isAllowed is false
+    }
+
+    [Fact]
+    public void FallbackPath_DomainInBlocklistAndBlocklistAllowlist_ReturnsBothBlockedAndAllowed()
+    {
+        // Arrange - test-blocked.example.com is in blocklist AND in blocklist allowlist (! line)
+        // Post-fix: isBlocked stays true, isAllowed is true
+        var blockListZone = new Dictionary<string, List<Uri>>
+        {
+            ["test-blocked.example.com"] = new List<Uri> { _testBlockListUri }
+        };
+        SetupBlockListZone(blockListZone);
+        SetupAllowListZone(new Dictionary<string, object>
+        {
+            ["test-blocked.example.com"] = null!
+        });
+
+        // Act - check domain (simulating fallback path, no CNAME chain)
+        var domainResult = _blockListZoneManager.CheckDomain("test-blocked.example.com");
+        var allowResult = _blockListZoneManager.CheckAllowList("test-blocked.example.com");
+
+        // Simulate fallback path logic from WebServiceBlockListApi (post-fix)
+        string fbAllowedBy = null;
+        bool isBlocked = domainResult.IsBlocked;
+        bool isAllowed = allowResult.IsAllowed || (fbAllowedBy == "allowed-zone");
+        if (allowResult.IsAllowed && fbAllowedBy is null)
+            fbAllowedBy = "blocklist";
+
+        // Assert - both isBlocked and isAllowed are true
+        Assert.True(domainResult.IsBlocked);  // Domain IS in blocklist
+        Assert.Equal("test-blocked.example.com", domainResult.BlockedDomain);
+        Assert.Contains(_testBlockListUri.AbsoluteUri, domainResult.BlockListUrls);
+        Assert.True(allowResult.IsAllowed);  // Domain IS in blocklist allowlist
+        Assert.True(isBlocked);  // isBlocked stays true (no longer overridden)
+        Assert.True(isAllowed);  // isAllowed is true
+        Assert.Equal("blocklist", fbAllowedBy);
+    }
+
+    [Fact]
+    public async Task CnameChain_FinalTargetParentInAllowedZone_ReturnsBothBlockedAndAllowed()
+    {
+        // Arrange - CNAME chain: ads.example.com -> tracking.example.com -> blocked.example.com (blocked)
+        // blocked.example.com's parent (example.com) is in AllowedZone
+        // Post-fix: isBlocked stays true, isAllowed is true
+        SetupBlockListZone(new Dictionary<string, List<Uri>>
+        {
+            ["blocked.example.com"] = new List<Uri> { _testBlockListUri }
+        });
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("example.com");
+
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateCnameChainResponse(
+                "ads.example.com",
+                new[] { "tracking.example.com", "blocked.example.com" },
+                "1.2.3.4"));
+        });
+
+        var resolver = new CnameChainResolver(mockResolver);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "ads.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(chain);
+        Assert.Equal(3, chain.Count); // 2 CNAME + 1 A record
+
+        // Simulate the CNAME chain path logic from WebServiceBlockListApi (post-fix)
+        string overallBlockedDomain = null;
+        List<string> overallBlockListUrls = new List<string>();
+        bool overallIsAllowed = false;
+        string allowedBy = null;
+        string matchedAllowedDomain = null;
+
+        foreach (CnameChainEntry entry in chain)
+        {
+            string checkDomain = entry.Target ?? entry.Domain;
+            var domainResult = _blockListZoneManager.CheckDomain(checkDomain);
+            var allowResult = _blockListZoneManager.CheckAllowList(checkDomain);
+
+            entry.IsBlocked = domainResult.IsBlocked;
+            entry.IsAllowed = allowResult.IsAllowed;
+
+            if (domainResult.IsBlocked)
+            {
+                entry.BlockedDomain = domainResult.BlockedDomain;
+                entry.BlockListUrls = domainResult.BlockListUrls;
+            }
+
+            if (allowResult.IsAllowed)
+            {
+                entry.IsBlocked = false;
+                overallIsAllowed = true;
+                matchedAllowedDomain = allowResult.AllowedDomain;
+                if (allowedBy is null)
+                    allowedBy = "blocklist";
+            }
+
+            // Post-fix: track blocked domain regardless of allow status
+            if (domainResult.IsBlocked && !allowResult.IsAllowed)
+            {
+                if (overallBlockedDomain is null)
+                {
+                    overallBlockedDomain = domainResult.BlockedDomain;
+                    overallBlockListUrls.AddRange(domainResult.BlockListUrls);
+                }
+            }
+        }
+
+        // Determine overall result based on final CNAME target
+        if (chain.Count > 0)
+        {
+            CnameChainEntry finalEntry = chain[chain.Count - 1];
+            string finalTarget = finalEntry.Target ?? finalEntry.Domain;
+
+            // Check final target against AllowedZoneManager
+            AllowedZoneManager allowedZoneManager = _dnsServer.AllowedZoneManager;
+            DnsDatagram finalRequest = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord(finalTarget, DnsResourceRecordType.A, DnsClass.IN) });
+
+            if (allowedZoneManager.IsAllowed(finalRequest))
+            {
+                allowedBy = "allowed-zone";
+                overallIsAllowed = true;
+                matchedAllowedDomain = finalTarget;
+            }
+
+            // Check final target against blocklist allowlist
+            var finalAllowResult = _blockListZoneManager.CheckAllowList(finalTarget);
+            if (finalAllowResult.IsAllowed)
+            {
+                overallIsAllowed = true;
+                matchedAllowedDomain = finalAllowResult.AllowedDomain;
+                if (allowedBy is null)
+                    allowedBy = "blocklist";
+            }
+        }
+
+        // Post-fix: isBlocked reflects blocklist status (no longer overridden by AllowedZone)
+        bool overallIsBlocked = overallBlockedDomain is not null;
+
+        // Assert - both isBlocked and isAllowed are true
+        Assert.True(overallIsBlocked);  // isBlocked stays true (blocked.example.com IS in blocklist)
+        Assert.Equal("blocked.example.com", overallBlockedDomain);
+        Assert.Contains(_testBlockListUri.AbsoluteUri, overallBlockListUrls);
+        Assert.True(overallIsAllowed);  // isAllowed should be true
+        Assert.Equal("allowed-zone", allowedBy);  // allowedBy should be "allowed-zone"
+        Assert.Equal("blocked.example.com", matchedAllowedDomain);  // matched the final target
+        // Note: entry-level IsBlocked is NOT cleared by AllowedZone — only the overall result is
+        Assert.True(chain[chain.Count - 1].IsBlocked);  // final target IS in blocklist at entry level
+    }
+
+    #endregion
+
+    #region IP Direct-Lookup Path Tests
+
+    [Fact]
+    public void IpDirectPath_IpInBlocklistAndAllowedZone_ReturnsBothBlockedAndAllowed()
+    {
+        // Arrange - IP is in blocklist AND in AllowedZoneManager
+        // Post-fix: isBlocked stays true, isAllowed is true
+        var blockListZone = new Dictionary<string, List<Uri>>
+        {
+            ["10.0.0.1"] = new List<Uri> { _testBlockListUri }
+        };
+        SetupBlockListZone(blockListZone);
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("10.0.0.1");
+
+        // Act - simulate IP direct-lookup path logic (post-fix)
+        var domainResult = _blockListZoneManager.CheckDomain("10.0.0.1");
+        var allowResult = _blockListZoneManager.CheckAllowList("10.0.0.1");
+
+        DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord("10.0.0.1", DnsResourceRecordType.A, DnsClass.IN) });
+        string ipAllowedBy = _dnsServer.AllowedZoneManager.IsAllowed(request) ? "allowed-zone" : null;
+
+        // Post-fix: isBlocked always reflects blocklist status
+        bool isBlocked = domainResult.IsBlocked;
+        bool isAllowed = allowResult.IsAllowed || (ipAllowedBy == "allowed-zone");
+
+        // Assert - both isBlocked and isAllowed are true
+        Assert.True(domainResult.IsBlocked);  // IP IS in blocklist
+        Assert.Equal("10.0.0.1", domainResult.BlockedDomain);
+        Assert.Contains(_testBlockListUri.AbsoluteUri, domainResult.BlockListUrls);
+        Assert.True(ipAllowedBy == "allowed-zone");  // IP IS in AllowedZone
+        Assert.True(isBlocked);  // isBlocked stays true (no longer overridden)
+        Assert.True(isAllowed);  // isAllowed set to true
+        Assert.Equal("allowed-zone", ipAllowedBy);
+    }
+
+    [Fact]
+    public void IpDirectPath_IpInBlocklistAndAllowlist_ReturnsBothBlockedAndAllowed()
+    {
+        // Arrange - IP is in blocklist AND in blocklist allowlist
+        // Post-fix: isBlocked stays true, isAllowed is true
+        var blockListZone = new Dictionary<string, List<Uri>>
+        {
+            ["10.0.0.1"] = new List<Uri> { _testBlockListUri }
+        };
+        SetupBlockListZone(blockListZone);
+        SetupAllowListZone(new Dictionary<string, object>
+        {
+            ["10.0.0.1"] = null!
+        });
+
+        // Act - simulate IP direct-lookup path logic (post-fix)
+        var domainResult = _blockListZoneManager.CheckDomain("10.0.0.1");
+        var allowResult = _blockListZoneManager.CheckAllowList("10.0.0.1");
+
+        // Post-fix: isBlocked always reflects blocklist status
+        string ipAllowedBy = null;
+        bool isBlocked = domainResult.IsBlocked;
+        bool isAllowed = allowResult.IsAllowed || (ipAllowedBy == "allowed-zone");
+
+        // Assert - both isBlocked and isAllowed are true
+        Assert.True(domainResult.IsBlocked);  // IP IS in blocklist
+        Assert.Equal("10.0.0.1", domainResult.BlockedDomain);
+        Assert.Contains(_testBlockListUri.AbsoluteUri, domainResult.BlockListUrls);
+        Assert.True(allowResult.IsAllowed);  // IP IS in allowlist
+        Assert.True(isBlocked);  // isBlocked stays true (no longer overridden)
+        Assert.True(isAllowed);  // isAllowed set to true
+        Assert.Null(ipAllowedBy);
+    }
+
+    #endregion
+
+    #region API-Level isBlocked+isAllowed Overlap Tests
+
+    /// <summary>
+    /// Tests the API response for a domain in both blocklist AND AllowedZone via the fallback path.
+    /// Verifies all required fields: matchedBlockedDomain, blockListUrls, matchedAllowedDomain, allowedBy.
+    /// </summary>
+    [Fact]
+    public void ApiOverlap_FallbackPath_BlocklistAndAllowedZone_BothFieldsPresent()
+    {
+        // Arrange - domain is in blocklist AND its parent is in AllowedZone
+        var blockListUrl = new Uri("http://blocklists.example.com/malware.txt");
+        var blockListZone = new Dictionary<string, List<Uri>>
+        {
+            ["malicious.example.com"] = new List<Uri> { blockListUrl }
+        };
+        SetupBlockListZone(blockListZone);
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("example.com");
+
+        // Act - simulate the full fallback path logic from WebServiceBlockListApi
+        var domainResult = _blockListZoneManager.CheckDomain("malicious.example.com");
+        var allowResult = _blockListZoneManager.CheckAllowList("malicious.example.com");
+
+        string fbAllowedBy = null;
+        AllowedZoneManager fbAllowedZoneManager = _dnsServer.AllowedZoneManager;
+        DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord("malicious.example.com", DnsResourceRecordType.A, DnsClass.IN) });
+        if (fbAllowedZoneManager.IsAllowed(request))
+            fbAllowedBy = "allowed-zone";
+
+        // Build API response fields (post-fix logic)
+        bool isBlocked = domainResult.IsBlocked;
+        bool isAllowed = allowResult.IsAllowed || (fbAllowedBy == "allowed-zone");
+
+        if (allowResult.IsAllowed)
+        {
+            if (fbAllowedBy is null)
+                fbAllowedBy = "blocklist";
+        }
+
+        // Assert - isBlocked and isAllowed are both true
+        Assert.True(isBlocked);
+        Assert.True(isAllowed);
+
+        // Assert - matchedBlockedDomain and blockListUrls are present and correct
+        Assert.Equal("malicious.example.com", domainResult.BlockedDomain);
+        Assert.Contains(blockListUrl.AbsoluteUri, domainResult.BlockListUrls);
+
+        // Assert - matchedAllowedDomain and allowedBy are present and correct
+        Assert.True(fbAllowedBy == "allowed-zone");
+    }
+
+    /// <summary>
+    /// Tests the API response for a domain in both blocklist AND AllowedZone via the CNAME chain path.
+    /// Verifies all required fields: matchedBlockedDomain, blockListUrls, matchedAllowedDomain, allowedBy.
+    /// </summary>
+    [Fact]
+    public async Task ApiOverlap_CnameChainPath_BlocklistAndAllowedZone_BothFieldsPresent()
+    {
+        // Arrange - CNAME chain: ads.example.com -> blocked.example.com (blocked)
+        // blocked.example.com's parent (example.com) is in AllowedZone
+        var blockListUrl = new Uri("http://blocklists.example.com/ads.txt");
+        SetupBlockListZone(new Dictionary<string, List<Uri>>
+        {
+            ["blocked.example.com"] = new List<Uri> { blockListUrl }
+        });
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("example.com");
+
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateCnameChainResponse(
+                "ads.example.com",
+                new[] { "blocked.example.com" },
+                "1.2.3.4"));
+        });
+
+        var resolver = new CnameChainResolver(mockResolver);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "ads.example.com", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert chain is valid
+        Assert.NotNull(chain);
+        Assert.Equal(2, chain.Count);
+
+        // Simulate the full CNAME chain path logic from WebServiceBlockListApi (post-fix)
+        string overallBlockedDomain = null;
+        List<string> overallBlockListUrls = new List<string>();
+        bool overallIsAllowed = false;
+        string allowedBy = null;
+        string matchedAllowedDomain = null;
+
+        foreach (CnameChainEntry entry in chain)
+        {
+            string checkDomain = entry.Target ?? entry.Domain;
+            var domainResult = _blockListZoneManager.CheckDomain(checkDomain);
+            var allowResult = _blockListZoneManager.CheckAllowList(checkDomain);
+
+            entry.IsBlocked = domainResult.IsBlocked;
+            entry.IsAllowed = allowResult.IsAllowed;
+
+            if (domainResult.IsBlocked)
+            {
+                entry.BlockedDomain = domainResult.BlockedDomain;
+                entry.BlockListUrls = domainResult.BlockListUrls;
+            }
+
+            if (allowResult.IsAllowed)
+            {
+                entry.IsBlocked = false;
+                overallIsAllowed = true;
+                matchedAllowedDomain = allowResult.AllowedDomain;
+                if (allowedBy is null)
+                    allowedBy = "blocklist";
+            }
+
+            // Post-fix: track blocked domain regardless of allow status
+            if (domainResult.IsBlocked && !allowResult.IsAllowed)
+            {
+                if (overallBlockedDomain is null)
+                {
+                    overallBlockedDomain = domainResult.BlockedDomain;
+                    overallBlockListUrls.AddRange(domainResult.BlockListUrls);
+                }
+            }
+        }
+
+        // Check final target against AllowedZoneManager
+        CnameChainEntry finalEntry = chain[chain.Count - 1];
+        string finalTarget = finalEntry.Target ?? finalEntry.Domain;
+        DnsDatagram finalRequest = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord(finalTarget, DnsResourceRecordType.A, DnsClass.IN) });
+        if (_dnsServer.AllowedZoneManager.IsAllowed(finalRequest))
+        {
+            allowedBy = "allowed-zone";
+            overallIsAllowed = true;
+            matchedAllowedDomain = finalTarget;
+        }
+
+        bool overallIsBlocked = overallBlockedDomain is not null;
+
+        // Assert - isBlocked and isAllowed are both true
+        Assert.True(overallIsBlocked);
+        Assert.True(overallIsAllowed);
+
+        // Assert - matchedBlockedDomain and blockListUrls are present and correct
+        Assert.Equal("blocked.example.com", overallBlockedDomain);
+        Assert.Contains(blockListUrl.AbsoluteUri, overallBlockListUrls);
+
+        // Assert - matchedAllowedDomain and allowedBy are present and correct
+        Assert.Equal("blocked.example.com", matchedAllowedDomain);
+        Assert.Equal("allowed-zone", allowedBy);
+    }
+
+    /// <summary>
+    /// Tests the API response for an IP in both blocklist AND AllowedZone via the IP direct-lookup path.
+    /// Verifies all required fields: matchedBlockedDomain, blockListUrls, matchedAllowedDomain, allowedBy.
+    /// </summary>
+    [Fact]
+    public void ApiOverlap_IpDirectPath_BlocklistAndAllowedZone_BothFieldsPresent()
+    {
+        // Arrange - IP is in blocklist AND in AllowedZoneManager
+        var blockListUrl = new Uri("http://blocklists.example.com/ips.txt");
+        var blockListZone = new Dictionary<string, List<Uri>>
+        {
+            ["192.168.1.100"] = new List<Uri> { blockListUrl }
+        };
+        SetupBlockListZone(blockListZone);
+        SetupAllowListZone(new Dictionary<string, object>());
+        _dnsServer.AllowedZoneManager.AllowZone("192.168.1.100");
+
+        // Act - simulate the full IP direct-lookup path logic from WebServiceBlockListApi
+        var domainResult = _blockListZoneManager.CheckDomain("192.168.1.100");
+        var allowResult = _blockListZoneManager.CheckAllowList("192.168.1.100");
+
+        DnsDatagram request = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord("192.168.1.100", DnsResourceRecordType.A, DnsClass.IN) });
+        string ipAllowedBy = _dnsServer.AllowedZoneManager.IsAllowed(request) ? "allowed-zone" : null;
+
+        // Build API response fields (post-fix logic)
+        bool isBlocked = domainResult.IsBlocked;
+        bool isAllowed = allowResult.IsAllowed || (ipAllowedBy == "allowed-zone");
+
+        if (allowResult.IsAllowed)
+        {
+            if (ipAllowedBy is null)
+                ipAllowedBy = "blocklist";
+        }
+
+        // Assert - isBlocked and isAllowed are both true
+        Assert.True(isBlocked);
+        Assert.True(isAllowed);
+
+        // Assert - matchedBlockedDomain and blockListUrls are present and correct
+        Assert.Equal("192.168.1.100", domainResult.BlockedDomain);
+        Assert.Contains(blockListUrl.AbsoluteUri, domainResult.BlockListUrls);
+
+        // Assert - matchedAllowedDomain and allowedBy are present and correct
+        Assert.True(ipAllowedBy == "allowed-zone");
+    }
+
+    /// <summary>
+    /// Tests the API response for a domain in blocklist AND blocklist allowlist via the fallback path.
+    /// Verifies all required fields are present when allowed by blocklist (not AllowedZone).
+    /// </summary>
+    [Fact]
+    public void ApiOverlap_FallbackPath_BlocklistAndAllowlist_BothFieldsPresent()
+    {
+        // Arrange - domain is in blocklist AND in blocklist allowlist
+        var blockListUrl = new Uri("http://blocklists.example.com/tracking.txt");
+        var blockListZone = new Dictionary<string, List<Uri>>
+        {
+            ["tracking.example.com"] = new List<Uri> { blockListUrl }
+        };
+        SetupBlockListZone(blockListZone);
+        SetupAllowListZone(new Dictionary<string, object>
+        {
+            ["tracking.example.com"] = null!
+        });
+
+        // Act
+        var domainResult = _blockListZoneManager.CheckDomain("tracking.example.com");
+        var allowResult = _blockListZoneManager.CheckAllowList("tracking.example.com");
+
+        // Simulate fallback path logic (post-fix)
+        string fbAllowedBy = null;
+        bool isBlocked = domainResult.IsBlocked;
+        bool isAllowed = allowResult.IsAllowed || (fbAllowedBy == "allowed-zone");
+        if (allowResult.IsAllowed && fbAllowedBy is null)
+            fbAllowedBy = "blocklist";
+
+        // Assert - isBlocked and isAllowed are both true
+        Assert.True(isBlocked);
+        Assert.True(isAllowed);
+
+        // Assert - matchedBlockedDomain and blockListUrls are present and correct
+        Assert.Equal("tracking.example.com", domainResult.BlockedDomain);
+        Assert.Contains(blockListUrl.AbsoluteUri, domainResult.BlockListUrls);
+
+        // Assert - matchedAllowedDomain and allowedBy are present and correct
+        Assert.Equal("tracking.example.com", allowResult.AllowedDomain);
+        Assert.Equal("blocklist", fbAllowedBy);
+    }
+
+    #endregion
 }

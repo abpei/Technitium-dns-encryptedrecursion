@@ -175,10 +175,12 @@ namespace DnsServerCore
                     BlockListDomainCheckResult domainResult = manager.CheckDomain(domain);
                     BlockListAllowCheckResult allowResult = manager.CheckAllowList(domain);
 
-                    jsonWriter.WriteString("domain", domainResult.Domain);
-                    jsonWriter.WriteBoolean("isBlocked", domainResult.IsBlocked);
+                    bool ipIsBlocked = domainResult.IsBlocked;
 
-                    if (domainResult.IsBlocked)
+                    jsonWriter.WriteString("domain", domainResult.Domain);
+                    jsonWriter.WriteBoolean("isBlocked", ipIsBlocked);
+
+                    if (ipIsBlocked)
                     {
                         jsonWriter.WriteString("matchedBlockedDomain", domainResult.BlockedDomain);
                         jsonWriter.WritePropertyName("blockListUrls");
@@ -190,7 +192,8 @@ namespace DnsServerCore
                         jsonWriter.WriteEndArray();
                     }
 
-                    jsonWriter.WriteBoolean("isAllowed", allowResult.IsAllowed);
+                    bool ipIsAllowed = allowResult.IsAllowed || (ipAllowedBy == "allowed-zone");
+                    jsonWriter.WriteBoolean("isAllowed", ipIsAllowed);
 
                     if (allowResult.IsAllowed)
                     {
@@ -259,8 +262,10 @@ namespace DnsServerCore
                     BlockListDomainCheckResult domainResult = manager.CheckDomain(domain);
                     BlockListAllowCheckResult allowResult = manager.CheckAllowList(domain);
 
+                    bool fbIsBlocked = domainResult.IsBlocked;
+
                     jsonWriter.WriteString("domain", domainResult.Domain);
-                    jsonWriter.WriteBoolean("isBlocked", domainResult.IsBlocked);
+                    jsonWriter.WriteBoolean("isBlocked", fbIsBlocked);
 
                     if (domainResult.IsBlocked)
                     {
@@ -274,7 +279,8 @@ namespace DnsServerCore
                         jsonWriter.WriteEndArray();
                     }
 
-                    jsonWriter.WriteBoolean("isAllowed", allowResult.IsAllowed);
+                    bool fbIsAllowed = allowResult.IsAllowed || (fbAllowedBy == "allowed-zone");
+                    jsonWriter.WriteBoolean("isAllowed", fbIsAllowed);
 
                     if (allowResult.IsAllowed)
                     {
@@ -362,10 +368,6 @@ namespace DnsServerCore
                 }
 
                 bool isBlocked = overallBlockedDomain is not null;
-
-                // Final target allowed overrides block
-                if (isAllowed && allowedBy == "allowed-zone")
-                    isBlocked = false;
 
                 // Write the JSON response
                 jsonWriter.WriteString("domain", domain);
