@@ -2534,4 +2534,140 @@ public class CnameChainResolverTests : IDisposable
     }
 
     #endregion
+
+    #region CNAME Chain Domain Checking Tests
+
+    /// <summary>
+    /// Simulates the CNAME chain loop from WebServiceBlockListApi: for each entry in
+    /// the chain, CheckDomain(entry.Domain) is called and the result is stored on the entry.
+    /// This tests that the ORIGINAL domain in the chain is checked, not just the target.
+    /// </summary>
+    private void SimulateCnameChainCheck(List<CnameChainEntry> chain, BlockListZoneManager manager)
+    {
+        foreach (CnameChainEntry entry in chain)
+        {
+            string checkDomain = entry.Domain;
+            BlockListDomainCheckResult domainResult = manager.CheckDomain(checkDomain);
+            BlockListAllowCheckResult allowResult = manager.CheckAllowList(checkDomain);
+            entry.IsBlocked = domainResult.IsBlocked;
+            entry.IsAllowed = allowResult.IsAllowed;
+            if (domainResult.IsBlocked)
+            {
+                entry.BlockedDomain = domainResult.BlockedDomain;
+                entry.BlockListUrls = domainResult.BlockListUrls;
+            }
+        }
+    }
+
+    [Fact]
+    public void CnameChainCheck_OriginalDomainBlocked_EntryReportedBlocked()
+    {
+        // Arrange: chat.z.ai (original domain) is blocked; its CNAME target is not
+        var blockListUrl = new Uri("http://example.com/blocklist.txt");
+        var blockListZone = new Dictionary<string, List<Uri>>
+        {
+            ["chat.z.ai"] = new List<Uri> { blockListUrl }
+        };
+        SetupBlockListZone(blockListZone);
+        SetupAllowListZone(new Dictionary<string, object>());
+
+        // CNAME chain: chat.z.ai -> chat.z.ai.a1.initaa.com (A 155.102.177.50)
+        var chain = new List<CnameChainEntry>
+        {
+            new CnameChainEntry { Domain = "chat.z.ai", Target = "chat.z.ai.a1.initaa.com" },
+            new CnameChainEntry { Domain = "chat.z.ai.a1.initaa.com", Target = null }
+        };
+
+        // Act
+        SimulateCnameChainCheck(chain, _blockListZoneManager);
+
+        // Assert: first entry (chat.z.ai) is blocked
+        Assert.True(chain[0].IsBlocked);
+        Assert.Equal("chat.z.ai", chain[0].BlockedDomain);
+        Assert.Contains(blockListUrl.AbsoluteUri, chain[0].BlockListUrls);
+
+        // Second entry (chat.z.ai.a1.initaa.com) is not blocked
+        Assert.False(chain[1].IsBlocked);
+    }
+
+    [Fact]
+    public void CnameChainCheck_TargetDomainBlocked_EntryReportedBlocked()
+    {
+        // Arrange: the CNAME target (chat.z.ai.a1.initaa.com) is blocked; original is not
+        var blockListUrl = new Uri("http://example.com/blocklist.txt");
+        var blockListZone = new Dictionary<string, List<Uri>>
+        {
+            ["chat.z.ai.a1.initaa.com"] = new List<Uri> { blockListUrl }
+        };
+        SetupBlockListZone(blockListZone);
+        SetupAllowListZone(new Dictionary<string, object>());
+
+        var chain = new List<CnameChainEntry>
+        {
+            new CnameChainEntry { Domain = "chat.z.ai", Target = "chat.z.ai.a1.initaa.com" },
+            new CnameChainEntry { Domain = "chat.z.ai.a1.initaa.com", Target = null }
+        };
+
+        // Act
+        SimulateCnameChainCheck(chain, _blockListZoneManager);
+
+        // Assert: first entry is not blocked (original domain not in blocklist)
+        Assert.False(chain[0].IsBlocked);
+
+        // Second entry (the target) is blocked
+        Assert.True(chain[1].IsBlocked);
+        Assert.Equal("chat.z.ai.a1.initaa.com", chain[1].BlockedDomain);
+    }
+
+    [Fact]
+    public void CnameChainCheck_NeitherOriginalNorTargetBlocked_BothReportNotBlocked()
+    {
+        // Arrange: neither domain is in the blocklist
+        SetupBlockListZone(new Dictionary<string, List<Uri>>());
+        SetupAllowListZone(new Dictionary<string, object>());
+
+        var chain = new List<CnameChainEntry>
+        {
+            new CnameChainEntry { Domain = "chat.z.ai", Target = "chat.z.ai.a1.initaa.com" },
+            new CnameChainEntry { Domain = "chat.z.ai.a1.initaa.com", Target = null }
+        };
+
+        // Act
+        SimulateCnameChainCheck(chain, _blockListZoneManager);
+
+        // Assert: neither entry is blocked
+        Assert.False(chain[0].IsBlocked);
+        Assert.False(chain[1].IsBlocked);
+    }
+
+    [Fact]
+    public void CnameChainCheck_ParentDomainBlocked_ChildDomainAlsoBlocked()
+    {
+        // Arrange: parent domain z.ai is blocked, so chat.z.ai should be blocked via hierarchy
+        var blockListUrl = new Uri("http://example.com/blocklist.txt");
+        var blockListZone = new Dictionary<string, List<Uri>>
+        {
+            ["z.ai"] = new List<Uri> { blockListUrl }
+        };
+        SetupBlockListZone(blockListZone);
+        SetupAllowListZone(new Dictionary<string, object>());
+
+        var chain = new List<CnameChainEntry>
+        {
+            new CnameChainEntry { Domain = "chat.z.ai", Target = "chat.z.ai.a1.initaa.com" },
+            new CnameChainEntry { Domain = "chat.z.ai.a1.initaa.com", Target = null }
+        };
+
+        // Act
+        SimulateCnameChainCheck(chain, _blockListZoneManager);
+
+        // Assert: chat.z.ai is blocked because parent z.ai is in blocklist
+        Assert.True(chain[0].IsBlocked);
+        Assert.Equal("z.ai", chain[0].BlockedDomain);
+
+        // chat.z.ai.a1.initaa.com is NOT blocked (different zone hierarchy)
+        Assert.False(chain[1].IsBlocked);
+    }
+
+    #endregion
 }
