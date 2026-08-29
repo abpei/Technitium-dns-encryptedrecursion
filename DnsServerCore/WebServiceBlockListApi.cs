@@ -315,7 +315,7 @@ namespace DnsServerCore
 
                 foreach (CnameChainEntry entry in chain)
                 {
-                    string checkDomain = entry.Target ?? entry.Domain;
+                    string checkDomain = entry.Domain;
 
                     BlockListDomainCheckResult domainResult = manager.CheckDomain(checkDomain);
                     BlockListAllowCheckResult allowResult = manager.CheckAllowList(checkDomain);
