@@ -315,7 +315,7 @@ namespace DnsServerCore
 
                 foreach (CnameChainEntry entry in chain)
                 {
-                    string checkDomain = entry.Target ?? entry.Domain;
+                    string checkDomain = entry.Domain;
 
                     BlockListDomainCheckResult domainResult = manager.CheckDomain(checkDomain);
                     BlockListAllowCheckResult allowResult = manager.CheckAllowList(checkDomain);
@@ -353,17 +353,31 @@ namespace DnsServerCore
                 CnameChainEntry lastEntry = chain[chain.Count - 1];
                 string finalTargetDomain = lastEntry.Target ?? lastEntry.Domain;
 
-                // Check the final target against AllowedZoneManager
-                // Allow/block determination happens at the final target only
+                // Check AllowedZoneManager: first test the original input domain,
+                // then fall through to the final CNAME target if not matched.
+                // This prevents false negatives when the user-added domain (e.g.
+                // chat.z.ai) differs from the CNAME resolution target.
                 if (allowedZoneManager is not null)
                 {
-                    DnsDatagram finalRequest = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord(finalTargetDomain, DnsResourceRecordType.A, DnsClass.IN) });
+                    DnsDatagram originalRequest = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord(domain, DnsResourceRecordType.A, DnsClass.IN) });
 
-                    if (allowedZoneManager.IsAllowed(finalRequest))
+                    if (allowedZoneManager.IsAllowed(originalRequest))
                     {
                         allowedBy = "allowed-zone";
                         isAllowed = true;
-                        matchedAllowedDomain = finalTargetDomain;
+                        matchedAllowedDomain = domain;
+                    }
+                    else
+                    {
+                        // Fall back to checking the final CNAME target
+                        DnsDatagram finalRequest = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, false, false, false, false, DnsResponseCode.NoError, new DnsQuestionRecord[] { new DnsQuestionRecord(finalTargetDomain, DnsResourceRecordType.A, DnsClass.IN) });
+
+                        if (allowedZoneManager.IsAllowed(finalRequest))
+                        {
+                            allowedBy = "allowed-zone";
+                            isAllowed = true;
+                            matchedAllowedDomain = finalTargetDomain;
+                        }
                     }
                 }
 
