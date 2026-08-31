@@ -164,7 +164,7 @@ Make contribution to Technitium and help making new software, updates, and featu
 
 ## PiDoH Encrypted-Recursion Fork
 
-This is a fork of Technitium DNS Server maintained by the [PIDOH project](https://mapleham.ca). The fork adds features not available in upstream.
+This is a fork of Technitium DNS Server maintained by the [PIDOH project](https://maplecube.net/pidoh). The fork adds features not available in upstream.
 
 ### Fork Features
 
