@@ -188,21 +188,22 @@ namespace DnsServerCore.Dns
                 return null;
 
             // If we have CNAME records but the chain ends without a final A/AAAA record,
-            // the last CNAME target should also be checked as a terminal entry
+            // the last CNAME target should also be checked as a terminal entry.
+            // Note: seenDomains already contains every CNAME target from chain construction,
+            // so a seenDomains guard here would suppress this terminal entry entirely.
+            // The terminal entry is appended unconditionally so the final CNAME target
+            // always reaches the blocklist/allowlist check.
             if (chain.All(e => e.Type == "CNAME"))
             {
                 string lastTarget = chain[chain.Count - 1].Target;
-                if (!seenDomains.Contains(lastTarget))
-                {
-                    bool isAllowed = IsDomainAllowed(lastTarget);
+                bool isAllowed = IsDomainAllowed(lastTarget);
 
-                    chain.Add(new CnameChainEntry
-                    {
-                        Domain = lastTarget,
-                        Type = "A",
-                        IsAllowed = isAllowed
-                    });
-                }
+                chain.Add(new CnameChainEntry
+                {
+                    Domain = lastTarget,
+                    Type = "A",
+                    IsAllowed = isAllowed
+                });
             }
 
             return chain;

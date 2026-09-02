@@ -887,6 +887,49 @@ public class MockDnsResolver : IDnsResolver
     }
 
     /// <summary>
+    /// Creates a mock DNS response with only CNAME records and no final A/AAAA record,
+    /// simulating the bug scenario where the answer section ends with CNAMEs only.
+    /// </summary>
+    public static DnsDatagram CreateCnameOnlyResponse(string domain, string[] cnameTargets)
+    {
+        var answer = new List<DnsResourceRecord>();
+
+        // Add CNAME records only (no terminal A/AAAA record)
+        foreach (var target in cnameTargets)
+        {
+            answer.Add(new DnsResourceRecord(
+                domain,
+                DnsResourceRecordType.CNAME,
+                DnsClass.IN,
+                300,
+                new DnsCNAMERecordData(target)));
+            domain = target;
+        }
+
+        // Create query from the original domain
+        var query = new DnsQuestionRecord(domain, DnsResourceRecordType.A, DnsClass.IN);
+
+        return new DnsDatagram(
+            (ushort)Random.Shared.Next(1, 65535),  // identifier
+            true,                                    // isResponse
+            DnsOpcode.StandardQuery,                  // opcode
+            true,                                    // authoritativeAnswer
+            false,                                   // isTruncated
+            true,                                    // recursionDesired
+            true,                                    // recursionAvailable
+            true,                                    // authenticData
+            false,                                   // checkingDisabled
+            DnsResponseCode.NoError,                 // rcode
+            new DnsQuestionRecord[] { query },       // question
+            answer,                                  // answer
+            null,                                    // authority
+            null,                                    // additional
+            (ushort)4096,                            // udpPayloadSize
+            EDnsHeaderFlags.None,                    // ednsFlags
+            null);                                   // ednsOptions
+    }
+
+    /// <summary>
     /// Creates a mock DNS response with a loop (A -> B -> A).
     /// </summary>
     public static DnsDatagram CreateCnameLoopResponse(string domain)
@@ -1214,8 +1257,9 @@ public class CnameChainResolverTests : IDisposable
 
         // Assert - loop detected, chain should have entries but not infinite
         Assert.NotNull(chain);
-        // Should have at most 2 entries (the looping CNAMEs)
-        Assert.True(chain.Count <= 2);
+        // The two looping CNAMEs are recorded; the terminal entry for the last CNAME
+        // target is now always appended (regression fix), so expect at most 3 entries.
+        Assert.True(chain.Count <= 3);
         // Should not crash or hang
     }
 
@@ -1724,6 +1768,41 @@ public class CnameChainResolverTests : IDisposable
 
         // Final target IS whitelisted → overall ALLOWED
         Assert.True(isAllowed);
+    }
+
+    [Fact]
+    public async Task CnameChain_PureCnameChainNoFinalARecord_ProducesTerminalEntry()
+    {
+        // Arrange - theguardian.remembering.ca scenario: answer section contains only
+        // CNAME records with no final A/AAAA record. Regression test: the terminal
+        // entry for the last CNAME target must ALWAYS be appended so the final target
+        // (e.g. casmp.adperfect.com) reaches the blocklist check.
+        var mockResolver = new MockDnsResolver(q =>
+        {
+            return Task.FromResult(MockDnsResolver.CreateCnameOnlyResponse(
+                "theguardian.remembering.ca",
+                new[] { "casmp.adperfect.com" }));
+        });
+
+        var resolver = new CnameChainResolver(mockResolver);
+
+        // Act
+        var chain = await resolver.ResolveCnameChainAsync(
+            "theguardian.remembering.ca", null, IPv6Mode.Disabled, 4096, false, false, CancellationToken.None);
+
+        // Assert - chain must include the terminal entry for the last CNAME target
+        Assert.NotNull(chain);
+        Assert.Equal(2, chain.Count); // CNAME + appended terminal entry
+
+        // First entry is the CNAME record
+        Assert.Equal("theguardian.remembering.ca", chain[0].Domain);
+        Assert.Equal("CNAME", chain[0].Type);
+        Assert.Equal("casmp.adperfect.com", chain[0].Target);
+
+        // Terminal entry must be present with the last CNAME target as its Domain
+        Assert.Equal("casmp.adperfect.com", chain[1].Domain);
+        Assert.Equal("A", chain[1].Type);
+        Assert.Null(chain[1].Target);
     }
 
     [Fact]
