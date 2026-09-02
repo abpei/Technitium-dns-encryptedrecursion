@@ -349,6 +349,36 @@ namespace DnsServerCore
                     }
                 }
 
+                // Defensive check: if no chain entry matched a blocked domain (e.g. a chain
+                // whose terminal entry was not materialized as its own entry), derive the
+                // final CNAME target from the last chain entry and check it directly.
+                // The allowlist wins: if the final target is allowed, leave the domain
+                // unblocked; otherwise populate the overall block result like the loop above.
+                if (overallBlockedDomain is null)
+                {
+                    CnameChainEntry finalChainEntry = chain[chain.Count - 1];
+                    string finalCheckTarget = finalChainEntry.Target ?? finalChainEntry.Domain;
+
+                    if (!string.IsNullOrEmpty(finalCheckTarget))
+                    {
+                        BlockListDomainCheckResult finalDomainResult = manager.CheckDomain(finalCheckTarget);
+                        BlockListAllowCheckResult finalAllowResult = manager.CheckAllowList(finalCheckTarget);
+
+                        if (finalAllowResult.IsAllowed)
+                        {
+                            isAllowed = true;
+                            matchedAllowedDomain = finalAllowResult.AllowedDomain;
+                            if (allowedBy is null)
+                                allowedBy = "blocklist";
+                        }
+                        else if (finalDomainResult.IsBlocked)
+                        {
+                            overallBlockedDomain = finalDomainResult.BlockedDomain;
+                            overallBlockListUrls.AddRange(finalDomainResult.BlockListUrls);
+                        }
+                    }
+                }
+
                 // Determine the final target domain in the chain (last entry's Target or Domain)
                 CnameChainEntry lastEntry = chain[chain.Count - 1];
                 string finalTargetDomain = lastEntry.Target ?? lastEntry.Domain;
