@@ -657,7 +657,70 @@ namespace DnsServerCore.Dns
             }
         }
 
+        //Config version written by this build. Version 7 is the upstream v15.5 version 6 layout with the fork's
+        //DoH custom landing page html appended.
+        const byte DNS_CONFIG_VERSION = 7;
+
+        //Version 6 was written by upstream v15.5 and by older builds of this fork using incompatible layouts, so
+        //a version 6 config file must be probed to find out which of the two layouts it was written with.
+        const byte DNS_CONFIG_VERSION_AMBIGUOUS = 6;
+
         private void ReadConfigFrom(Stream s, bool isConfigTransfer)
+        {
+            //buffer the config since the version 6 layout probe below needs to re-read the same data
+            using (MemoryStream configBuffer = new MemoryStream())
+            {
+                s.CopyTo(configBuffer);
+                configBuffer.Position = 0;
+
+                byte version = ReadConfigHeader(configBuffer);
+
+                if (version != DNS_CONFIG_VERSION_AMBIGUOUS)
+                {
+                    //versions 1 to 5 have the legacy cache prefetch sampling options and no DoH landing page html;
+                    //versions 7 and above have the DoH landing page html and no legacy cache prefetch sampling options
+                    ReadConfigBody(configBuffer, version, version > DNS_CONFIG_VERSION_AMBIGUOUS, version < DNS_CONFIG_VERSION_AMBIGUOUS, isConfigTransfer);
+                    return;
+                }
+
+                //version 6 is ambiguous: upstream v15.5 dropped the legacy cache prefetch sampling options while this
+                //fork kept them and appended the DoH landing page html. Try the fork layout first since all existing
+                //fork deployments use it, and fall back to the upstream layout. A layout is accepted only when it
+                //reads the config completely, so that a probe cannot silently load garbage settings.
+                Exception forkLayoutError;
+
+                try
+                {
+                    ReadConfigBody(configBuffer, version, true, true, isConfigTransfer);
+                    ValidateConfigFullyRead(configBuffer);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    forkLayoutError = ex;
+                }
+
+                configBuffer.Position = 0;
+                ReadConfigHeader(configBuffer);
+
+                try
+                {
+                    ReadConfigBody(configBuffer, version, false, false, isConfigTransfer);
+                    ValidateConfigFullyRead(configBuffer);
+                    return;
+                }
+                catch (Exception)
+                {
+                    //neither of the two known version 6 layouts could read this config file
+                    throw new InvalidDataException("DNS Server config version 6 file layout is not supported.", forkLayoutError);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Reads and validates the config file format marker and version byte.
+        /// </summary>
+        private static byte ReadConfigHeader(Stream s)
         {
             if (Encoding.ASCII.GetString(s.ReadExactly(2)) != "DC") //format
                 throw new InvalidDataException("DNS Server config file format is invalid.");
@@ -665,8 +728,28 @@ namespace DnsServerCore.Dns
             BinaryReader bR = new BinaryReader(s);
 
             int version = bR.ReadByte();
-            if ((version < 1) || (version > 6))
+            if ((version < 1) || (version > DNS_CONFIG_VERSION))
                 throw new InvalidDataException("DNS Server config version not supported.");
+
+            return (byte)version;
+        }
+
+        /// <summary>
+        /// Confirms that a config layout read the whole config so that a layout probe cannot accept a partial parse.
+        /// </summary>
+        private static void ValidateConfigFullyRead(Stream s)
+        {
+            if (s.Position != s.Length)
+                throw new InvalidDataException("DNS Server config file was not fully read.");
+        }
+
+        /// <summary>
+        /// Reads the config body. The DoH landing page html and the legacy cache prefetch sampling options are not
+        /// present in all config layouts, so they are controlled by flags instead of being derived from the version.
+        /// </summary>
+        private void ReadConfigBody(Stream s, int version, bool hasDohCustomLandingPageHtml, bool hasLegacyCachePrefetchSamplingOptions, bool isConfigTransfer)
+        {
+            BinaryReader bR = new BinaryReader(s);
 
             //general
             string serverDomain = s.ReadShortString();
@@ -910,7 +993,7 @@ namespace DnsServerCore.Dns
                     _enableDnsOverHttpHelpRedirect = true;
             }
 
-            if (version >= 6)
+            if (hasDohCustomLandingPageHtml)
             {
                 _dohCustomLandingPageHtml = bR.ReadString();
                 if (_dohCustomLandingPageHtml.Length == 0)
@@ -1096,7 +1179,7 @@ namespace DnsServerCore.Dns
             if (!isConfigTransfer)
                 _cachePrefetchTrigger = cachePrefetchTrigger;
 
-            if (version < 6)
+            if (hasLegacyCachePrefetchSamplingOptions)
             {
                 int cachePrefetchSampleIntervalMinutes = bR.ReadInt32();
                 int cachePrefetchSampleEligibilityHitsPerHour = bR.ReadInt32();
@@ -1227,7 +1310,7 @@ namespace DnsServerCore.Dns
             BinaryWriter bW = new BinaryWriter(s);
 
             bW.Write(Encoding.ASCII.GetBytes("DC")); //format
-            bW.Write((byte)6); //version
+            bW.Write(DNS_CONFIG_VERSION); //version
 
             //general
             s.WriteShortString(_serverDomain);
