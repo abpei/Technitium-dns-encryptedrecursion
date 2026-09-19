@@ -302,14 +302,49 @@ else
 fi
 
 # ============================================
-# TEST 8: Fork label shows 'PiDoH |' in version string
+# TEST 8: Fork label in version string matches the fork.json suffix scheme.
+# Current format: "<clean upstream version> (<forkShortName> <forkVersion without 'v'> (Technitium <upstreamVersion>))",
+# e.g. "15.5 (PiDoH 15.4.0-pidoh-dev.33 (Technitium 15.4.0))".
+# Expected values are derived from the shipped DnsServerApp/fork.json (never hard-coded)
+# so a future version-scheme change re-breaks this test loudly instead of passing silently.
 # ============================================
 VERSION_RESPONSE=$(curl -s "http://localhost:${WEB_PORT}/api/user/login?user=${API_USER}&pass=${API_PASS}&includeInfo=true" 2>/dev/null)
 VERSION=$(echo "$VERSION_RESPONSE" | grep -o '"version":"[^"]*"' | head -1 | cut -d'"' -f4)
-if echo "$VERSION" | grep -q "PiDoH |"; then
-    log_test "8. Fork label shows 'PiDoH |' in version string" "PASS" "Version: $VERSION"
+
+# Print the observed version string so every gate run records the live label shape.
+echo "Observed version string: $VERSION"
+
+# Locate the shipped fork.json: prefer the repo path given on the command line, else the repo this script lives in.
+FORK_JSON="${REPO_PATH}/DnsServerApp/fork.json"
+if [[ ! -f "$FORK_JSON" ]]; then
+    FORK_JSON="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)/DnsServerApp/fork.json"
+fi
+
+# Read forkShortName, upstreamVersion and the "v"-stripped forkVersion from fork.json (one value per line).
+FORK_FIELDS=$(python3 - "$FORK_JSON" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        data = json.load(handle)
+except Exception:
+    sys.exit(1)
+fork_version = str(data.get("forkVersion", ""))
+print(data.get("forkShortName", ""))
+print(data.get("upstreamVersion", ""))
+print(fork_version[1:] if fork_version.startswith("v") else fork_version)
+PY
+)
+FORK_SHORT_NAME=$(echo "$FORK_FIELDS" | sed -n '1p')
+FORK_UPSTREAM_VERSION=$(echo "$FORK_FIELDS" | sed -n '2p')
+FORK_DISPLAY_VERSION=$(echo "$FORK_FIELDS" | sed -n '3p')
+EXPECTED_LABEL="${FORK_SHORT_NAME} ${FORK_DISPLAY_VERSION} (Technitium ${FORK_UPSTREAM_VERSION})"
+
+if [[ -z "$FORK_SHORT_NAME" || -z "$FORK_UPSTREAM_VERSION" || -z "$FORK_DISPLAY_VERSION" ]]; then
+    log_test "8. Fork label matches fork.json suffix scheme" "FAIL" "Could not derive fork label from ${FORK_JSON}; Version: $VERSION"
+elif echo "$VERSION" | grep -qF "$EXPECTED_LABEL"; then
+    log_test "8. Fork label matches fork.json suffix scheme" "PASS" "Version: $VERSION (expected label: $EXPECTED_LABEL)"
 else
-    log_test "8. Fork label shows 'PiDoH |' in version string" "FAIL" "Version: $VERSION"
+    log_test "8. Fork label matches fork.json suffix scheme" "FAIL" "Version: $VERSION (missing expected label: $EXPECTED_LABEL)"
 fi
 
 # ============================================
