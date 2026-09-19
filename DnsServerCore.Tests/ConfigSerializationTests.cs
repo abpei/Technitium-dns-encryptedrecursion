@@ -40,16 +40,18 @@ public class ConfigSerializationTests
     }
 
     /// <summary>
-    /// Verifies that the DNS Server config version is 6.
-    /// This version was bumped for the DoH custom landing page feature.
+    /// Verifies that the DNS Server config version is 7.
+    /// This version was bumped so that the fork layout (upstream v15.5 layout plus the DoH custom landing page
+    /// html) is not confused with the version 6 layout written by upstream v15.5. The real write and read
+    /// round-trip of every layout is covered by ConfigVersionCompatibilityTests.
     /// </summary>
     [Fact]
-    public void DnsServerConfigVersion_ShouldBe6()
+    public void DnsServerConfigVersion_ShouldBe7()
     {
         // This test verifies the expected config version by reading the source code.
-        // The version is written as byte 6 at line 1245 in DnsServer.cs.
+        // The version is written as byte 7 in DnsServer.cs.
         // We verify this by checking the expected value.
-        byte expectedVersion = 6;
+        byte expectedVersion = 7;
 
         // Act - simulate config write
         var stream = new MemoryStream();
