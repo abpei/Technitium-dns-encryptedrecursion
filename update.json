@@ -1,7 +1,7 @@
 {
-    "updateVersion": "15.4.0-pidoh.7",
-    "updateTitle": "PiDoH Fork v15.4.0-pidoh.7 Available!",
+    "updateVersion": "15.5.0-pidoh.1",
+    "updateTitle": "PiDoH Fork v15.5.0-pidoh.1 Available!",
     "updateMessage": "Fix: CNAME chain allow/block checks final target only. Root/domain whitelists no longer override blocked CNAME targets. Fixes ALLOWED banner display.",
-    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh.7",
-    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.4.0-pidoh.7"
+    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.5.0-pidoh.1",
+    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.5.0-pidoh.1"
 }
