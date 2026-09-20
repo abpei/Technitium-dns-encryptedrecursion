@@ -34,7 +34,7 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0
 ADD --link https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb /
 RUN <<HEREDOC
   dpkg -i packages-microsoft-prod.deb && rm packages-microsoft-prod.deb
-  apt-get update && apt-get install -y libmsquic dnsutils iputils-ping
+  apt-get update && apt-get install -y libmsquic dnsutils iputils-ping curl
   apt-get clean -y && rm -rf /var/lib/apt/lists/*
   mkdir /etc/dns
 HEREDOC
@@ -45,3 +45,6 @@ COPY --from=build /app/publish /opt/technitium/dns
 
 ENTRYPOINT ["/usr/bin/dotnet", "/opt/technitium/dns/DnsServerApp.dll"]
 CMD ["/etc/dns"]
+
+
+LABEL org.opencontainers.image.version=15.5.0

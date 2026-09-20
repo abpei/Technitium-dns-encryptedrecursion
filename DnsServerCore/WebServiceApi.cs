@@ -116,7 +116,10 @@ namespace DnsServerCore
                     string instructionsLink = jsonResponse.GetPropertyValue("instructionsLink", null);
                     string changeLogLink = jsonResponse.GetPropertyValue("changeLogLink", null);
 
-                    bool updateAvailable = new Version(updateVersion) > _dnsWebService._currentVersion;
+                    // the assembly version does not carry the fork release, so the comparison uses the installed node's own fork.json values
+                    DnsWebService.TryGetForkMetadata(out string installedForkVersion, out _, out string installedUpstreamVersion, out string installedForkBranch);
+
+                    bool updateAvailable = DnsWebService.IsUpdateAvailable(updateVersion, installedForkVersion, installedUpstreamVersion, installedForkBranch, warning => _dnsWebService._log.Write(_dnsWebService.GetRemoteEndPoint(context), warning));
 
                     jsonWriter.WriteBoolean("dnsServerEnableCheckForUpdate", true);
                     jsonWriter.WriteBoolean("updateAvailable", updateAvailable);
@@ -449,10 +452,14 @@ namespace DnsServerCore
 
             public async Task HealthCheckAsync(HttpContext context)
             {
-                User sessionUser = _dnsWebService.GetSessionUser(context);
+                //unauthenticated call from localhost allowed, so check for permissions only when user session is available
+                if (context.Items["session"] is UserSession)
+                {
+                    User sessionUser = _dnsWebService.GetSessionUser(context);
 
-                if (!_dnsWebService._authManager.IsPermitted(PermissionSection.DnsClient, sessionUser, PermissionFlag.View))
-                    throw new DnsWebServiceException("Access was denied.");
+                    if (!_dnsWebService._authManager.IsPermitted(PermissionSection.DnsClient, sessionUser, PermissionFlag.View))
+                        throw new DnsWebServiceException("Access was denied.");
+                }
 
                 HttpRequest request = context.Request;
 
