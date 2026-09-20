@@ -1,7 +1,7 @@
 {
-    "updateVersion": "15.5.0-pidoh-dev.2",
-    "updateTitle": "PiDoH Fork v15.5.0-pidoh-dev.2 Available!",
+    "updateVersion": "15.5.0-pidoh-dev.3",
+    "updateTitle": "PiDoH Fork v15.5.0-pidoh-dev.3 Available!",
     "updateMessage": "Fix: pure-CNAME chains are now always blocklist-checked at the terminal target. CNAME chains ending in a blocked domain are reliably blocked (resolver + Block List API).",
-    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.5.0-pidoh-dev.2",
-    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.5.0-pidoh-dev.2"
+    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.5.0-pidoh-dev.3",
+    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.5.0-pidoh-dev.3"
 }
