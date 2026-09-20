@@ -134,9 +134,30 @@ jobs:
             NOTES=$(python3 -c "import json; print(json.load(open('update.json'))['updateMessage'])")
           fi
           
+          # Commit this release is built from: HEAD, i.e. the version-bump commit pushed above.
+          BUILT_COMMIT=$(git rev-parse HEAD)
+
           # Build arguments as array to avoid shell injection via eval
-          ARGS=("${{ steps.version.outputs.fork_version }}" DnsServerPortable.tar.gz --title "PiDoH ${{ steps.version.outputs.fork_version }}" --notes "$NOTES")
+          # --target pins the tag to the released branch tip (the bump commit pushed above).
+          # Without --target, gh release create tags the repository default branch (master)
+          # instead of the commit the tarball was built from.
+          ARGS=("${{ steps.version.outputs.fork_version }}" DnsServerPortable.tar.gz --title "PiDoH ${{ steps.version.outputs.fork_version }}" --notes "$NOTES" --target "${{ inputs.branch }}")
           if [ "${{ steps.version.outputs.fork_branch }}" = "dev" ]; then
             ARGS+=(--prerelease)
           fi
           gh release create "${ARGS[@]}"
+
+          # Verify the published tag resolves to the commit this release was built from.
+          TAG="${{ steps.version.outputs.fork_version }}"
+          REMOTE_TAG_COMMIT=$(git ls-remote origin "refs/tags/$TAG^{}" | awk '{print $1}')
+          if [ -z "$REMOTE_TAG_COMMIT" ]; then
+            # Lightweight tag: no peeled ref, so take the ref itself.
+            REMOTE_TAG_COMMIT=$(git ls-remote origin "refs/tags/$TAG" | awk '{print $1}')
+          fi
+          echo "Built commit: $BUILT_COMMIT"
+          echo "Tag commit:   $REMOTE_TAG_COMMIT"
+          if [ "$REMOTE_TAG_COMMIT" != "$BUILT_COMMIT" ]; then
+            echo "::error::Release tag $TAG resolves to $REMOTE_TAG_COMMIT but the release was built from $BUILT_COMMIT"
+            exit 1
+          fi
+          echo "Verified: tag $TAG -> $REMOTE_TAG_COMMIT"
