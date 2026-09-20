@@ -44,6 +44,7 @@ using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Net;
@@ -1628,37 +1629,49 @@ namespace DnsServerCore
 
         private static string GetForkLabel()
         {
+            if (!TryGetForkMetadata(out string forkVersion, out string forkShortName, out string upstreamVersion, out _))
+                return null;
+
+            // Strip "v" prefix for display
+            string displayVersion = forkVersion.StartsWith('v') ? forkVersion[1..] : forkVersion;
+
+            // Format: "PiDoH 15.4.0-pidoh.1 (Technitium 15.4.0)"
+            string label = (forkShortName ?? "Fork") + " " + displayVersion;
+            if (upstreamVersion is not null)
+                label += " (Technitium " + upstreamVersion + ")";
+            return label;
+        }
+
+        // Reads the installed node's fork.json and returns its metadata values, reporting failure instead of throwing on any error.
+        static bool TryGetForkMetadata(out string forkVersion, out string forkShortName, out string upstreamVersion, out string forkBranch)
+        {
+            forkVersion = null;
+            forkShortName = null;
+            upstreamVersion = null;
+            forkBranch = null;
+
             try
             {
                 string assemblyDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
                 string forkJsonPath = Path.Combine(assemblyDir, "fork.json");
 
                 if (!File.Exists(forkJsonPath))
-                    return null;
+                    return false;
 
                 string json = File.ReadAllText(forkJsonPath);
                 using JsonDocument doc = JsonDocument.Parse(json);
                 JsonElement root = doc.RootElement;
 
-                string forkVersion = root.TryGetProperty("forkVersion", out JsonElement ver) ? ver.GetString() : null;
-                string forkShortName = root.TryGetProperty("forkShortName", out JsonElement name) ? name.GetString() : null;
-                string upstreamVersion = root.TryGetProperty("upstreamVersion", out JsonElement upstream) ? upstream.GetString() : null;
+                forkVersion = root.TryGetProperty("forkVersion", out JsonElement ver) ? ver.GetString() : null;
+                forkShortName = root.TryGetProperty("forkShortName", out JsonElement name) ? name.GetString() : null;
+                upstreamVersion = root.TryGetProperty("upstreamVersion", out JsonElement upstream) ? upstream.GetString() : null;
+                forkBranch = root.TryGetProperty("forkBranch", out JsonElement branch) ? branch.GetString() : null;
 
-                if (forkVersion is null)
-                    return null;
-
-                // Strip "v" prefix for display
-                string displayVersion = forkVersion.StartsWith('v') ? forkVersion[1..] : forkVersion;
-
-                // Format: "PiDoH 15.4.0-pidoh.1 (Technitium 15.4.0)"
-                string label = (forkShortName ?? "Fork") + " " + displayVersion;
-                if (upstreamVersion is not null)
-                    label += " (Technitium " + upstreamVersion + ")";
-                return label;
+                return forkVersion is not null;
             }
             catch
             {
-                return null;
+                return false;
             }
         }
 
@@ -1673,6 +1686,102 @@ namespace DnsServerCore
                 strVersion += "." + version.Revision;
 
             return strVersion;
+        }
+
+        #endregion
+
+        #region update check
+
+        readonly static System.Text.RegularExpressions.Regex forkVersionRegex = new System.Text.RegularExpressions.Regex(@"^v?(\d+\.\d+\.\d+)(?:-pidoh(-dev)?\.(\d+))?$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        const string FORK_LINE_DEV = "dev";
+
+        // Compares the update feed's version against the installed node's own fork.json values to decide if a newer fork release is available.
+        public static bool IsUpdateAvailable(string updateVersion, string installedForkVersion, string installedUpstreamVersion, string installedLine, Action<string> logWarning = null)
+        {
+            if (!TryParseForkVersion(updateVersion, out Version updateBaseVersion, out bool updateIsDevLine, out int updateIncrement))
+            {
+                LogUpdateCheckWarning(logWarning, "update", updateVersion);
+                return false;
+            }
+
+            if (!TryParseForkVersion(installedForkVersion, out _, out _, out int installedIncrement))
+            {
+                LogUpdateCheckWarning(logWarning, "installed fork", installedForkVersion);
+                return false;
+            }
+
+            if (!Version.TryParse(installedUpstreamVersion, out Version installedBaseVersion))
+            {
+                LogUpdateCheckWarning(logWarning, "installed upstream", installedUpstreamVersion);
+                return false;
+            }
+
+            // a newer upstream base is always an update
+            if (updateBaseVersion > installedBaseVersion)
+                return true;
+
+            // an older upstream base is never an update
+            if (updateBaseVersion < installedBaseVersion)
+                return false;
+
+            // an equal upstream base is only comparable on the same release line, so a dev and a stable release of the same base are suppressed
+            if (updateIsDevLine != IsInstalledDevLine(installedForkVersion, installedLine))
+                return false;
+
+            // the same base and release line require a higher fork increment to be an update
+            return updateIncrement > installedIncrement;
+        }
+
+        // Parses a fork version string in the fork convention vX.Y.Z-pidoh[-dev].N, tolerating a missing "v" prefix and legacy plain X.Y.Z versions.
+        static bool TryParseForkVersion(string version, out Version upstreamBaseVersion, out bool isDevLine, out int increment)
+        {
+            upstreamBaseVersion = null;
+            isDevLine = false;
+            increment = 0;
+
+            if (string.IsNullOrWhiteSpace(version))
+                return false;
+
+            System.Text.RegularExpressions.Match match = forkVersionRegex.Match(version.Trim());
+
+            if (!match.Success)
+                return false;
+
+            if (!Version.TryParse(match.Groups[1].Value, out upstreamBaseVersion))
+                return false;
+
+            isDevLine = match.Groups[2].Success;
+
+            if (match.Groups[3].Success)
+                return int.TryParse(match.Groups[3].Value, NumberStyles.None, CultureInfo.InvariantCulture, out increment);
+
+            return true;
+        }
+
+        // Determines if the installed fork is on the dev release line, trusting the fork convention suffix in its version and falling back to the branch or line value otherwise.
+        static bool IsInstalledDevLine(string installedForkVersion, string installedLine)
+        {
+            if (!string.IsNullOrWhiteSpace(installedForkVersion))
+            {
+                System.Text.RegularExpressions.Match match = forkVersionRegex.Match(installedForkVersion.Trim());
+
+                // group 3 matches the "-pidoh[-dev].N" label that marks the fork convention
+                if (match.Success && match.Groups[3].Success)
+                    return match.Groups[2].Success;
+            }
+
+            // the installed line accepts both the line names ("dev"/"stable") and the fork branch names ("dev"/"master")
+            return string.Equals(installedLine, FORK_LINE_DEV, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Writes a single clear warning naming the version value that failed to parse during an update check.
+        static void LogUpdateCheckWarning(Action<string> logWarning, string source, string version)
+        {
+            if (logWarning is null)
+                return;
+
+            logWarning("Check for update failed to parse the " + source + " version '" + (string.IsNullOrWhiteSpace(version) ? "(empty)" : version) + "'. No update will be reported.");
         }
 
         #endregion
