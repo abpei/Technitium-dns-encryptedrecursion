@@ -116,7 +116,10 @@ namespace DnsServerCore
                     string instructionsLink = jsonResponse.GetPropertyValue("instructionsLink", null);
                     string changeLogLink = jsonResponse.GetPropertyValue("changeLogLink", null);
 
-                    bool updateAvailable = new Version(updateVersion) > _dnsWebService._currentVersion;
+                    // the assembly version does not carry the fork release, so the comparison uses the installed node's own fork.json values
+                    DnsWebService.TryGetForkMetadata(out string installedForkVersion, out _, out string installedUpstreamVersion, out string installedForkBranch);
+
+                    bool updateAvailable = DnsWebService.IsUpdateAvailable(updateVersion, installedForkVersion, installedUpstreamVersion, installedForkBranch, warning => _dnsWebService._log.Write(_dnsWebService.GetRemoteEndPoint(context), warning));
 
                     jsonWriter.WriteBoolean("dnsServerEnableCheckForUpdate", true);
                     jsonWriter.WriteBoolean("updateAvailable", updateAvailable);
