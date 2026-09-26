@@ -47,4 +47,4 @@ ENTRYPOINT ["/usr/bin/dotnet", "/opt/technitium/dns/DnsServerApp.dll"]
 CMD ["/etc/dns"]
 
 
-LABEL org.opencontainers.image.version=15.5.0
+LABEL org.opencontainers.image.version=15.5.1
