@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text;
 using Xunit;
 using DnsServerCore.Dns;
@@ -40,38 +41,24 @@ public class ConfigSerializationTests
     }
 
     /// <summary>
-    /// Verifies that the DNS Server config version is 7.
-    /// This version was bumped so that the fork layout (upstream v15.5 layout plus the DoH custom landing page
-    /// html) is not confused with the version 6 layout written by upstream v15.5. The real write and read
-    /// round-trip of every layout is covered by ConfigVersionCompatibilityTests.
+    /// Verifies that the DNS Server config version constant is 8.
+    /// Version 8 is the upstream v15.6 version 7 layout (with the explicit cache prefetch bool) plus the fork's
+    /// DoH custom landing page html, so that it cannot be confused with either the upstream v15.6 version 7
+    /// layout or the fork version 7 layout. The real write and read round-trip of every layout is covered by
+    /// ConfigVersionCompatibilityTests.
     /// </summary>
     [Fact]
-    public void DnsServerConfigVersion_ShouldBe7()
+    public void DnsServerConfigVersion_ShouldBe8()
     {
-        // This test verifies the expected config version by reading the source code.
-        // The version is written as byte 7 in DnsServer.cs.
-        // We verify this by checking the expected value.
-        byte expectedVersion = 7;
+        // Arrange
+        FieldInfo? versionField = typeof(DnsServer).GetField("DNS_CONFIG_VERSION", BindingFlags.NonPublic | BindingFlags.Static);
 
-        // Act - simulate config write
-        var stream = new MemoryStream();
-        using (var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true))
-        {
-            writer.Write((byte)expectedVersion);
-        }
-
-        // Act - simulate config read
-        stream.Position = 0;
-        byte result;
-        using (var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true))
-        {
-            result = reader.ReadByte();
-        }
-
-        stream.Dispose();
+        // Act
+        object? value = versionField?.GetRawConstantValue();
 
         // Assert
-        Assert.Equal(expectedVersion, result);
+        Assert.NotNull(versionField);
+        Assert.Equal((byte)8, value);
     }
 
     /// <summary>
