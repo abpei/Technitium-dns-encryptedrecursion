@@ -6,17 +6,21 @@ using Xunit;
 namespace DnsServerCore.Tests;
 
 /// <summary>
-/// Tests the DNS server config reader and writer against the config version 6 collision between upstream v15.5
-/// (which dropped the cache prefetch sampling options) and this fork (which kept them and appended the DoH
-/// custom landing page html), plus a fresh write/read round-trip.
+/// Tests the DNS server config reader and writer against the ambiguous config version 6 collision (upstream v15.5
+/// dropped the cache prefetch sampling options while this fork kept them and appended the DoH custom landing page
+/// html), the ambiguous config version 7 collision (upstream v15.6 added an explicit cache prefetch bool while
+/// this fork based on upstream v15.5 kept only the landing page html), and a fresh version 8 write/read round-trip.
 /// </summary>
 public class ConfigVersionCompatibilityTests : IDisposable
 {
-    /// <summary>Config version written by the current build (upstream v15.5 layout plus fork landing page html).</summary>
-    const byte ForkConfigVersion = 7;
+    /// <summary>Config version written by the current build (upstream v15.6 v7 layout plus fork landing page html).</summary>
+    const byte ForkConfigVersion = 8;
 
     /// <summary>Config version written by both upstream v15.5 and older fork builds with different layouts.</summary>
-    const byte AmbiguousConfigVersion = 6;
+    const byte AmbiguousConfigVersionV6 = 6;
+
+    /// <summary>Config version written by both upstream v15.6 and this fork with different layouts.</summary>
+    const byte AmbiguousConfigVersionV7 = 7;
 
     /// <summary>Legacy cache prefetch sampling options that only exist in the version 1 to 5 and fork version 6 layouts.</summary>
     static readonly byte[] LegacyCachePrefetchSamplingOptions = [.. BitConverter.GetBytes(60), .. BitConverter.GetBytes(1000)];
@@ -57,11 +61,11 @@ public class ConfigVersionCompatibilityTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies that the config written by this build uses version 7 so that it cannot be confused with the
-    /// upstream v15.5 version 6 layout that is missing the DoH custom landing page html field.
+    /// Verifies that the config written by this build uses version 8 so that it cannot be confused with either the
+    /// upstream v15.6 version 7 layout or the fork version 7 layout that lacks the explicit cache prefetch bool.
     /// </summary>
     [Fact]
-    public void WriteConfig_ShouldUseVersion7()
+    public void WriteConfig_ShouldUseVersion8()
     {
         // Arrange
         DnsServer server = CreateServer("writer");
@@ -75,7 +79,8 @@ public class ConfigVersionCompatibilityTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies that every sentinel setting survives a fresh write and read round-trip of the current layout.
+    /// Verifies that every sentinel setting survives a fresh write and read round-trip of the current version 8
+    /// layout, including the explicit cache prefetch option and the fork landing page html.
     /// </summary>
     [Fact]
     public void WriteThenRead_ShouldPreserveSettings()
@@ -89,7 +94,79 @@ public class ConfigVersionCompatibilityTests : IDisposable
 
         // Assert
         Assert.Equal(0, leftover);
-        AssertSentinelSettings(reader, expectLandingPageHtml: true);
+        AssertSentinelSettings(reader, expectLandingPageHtml: true, expectEnableCachePrefetch: false);
+    }
+
+    /// <summary>
+    /// Verifies that a written version 8 config is byte-layout stable: reading it back and writing it again with
+    /// the same settings must reproduce the exact same bytes, which proves the version 8 field order is correct
+    /// and the round-trip is lossless.
+    /// </summary>
+    [Fact]
+    public void WriteThenReadThenWrite_ShouldBeByteIdentical()
+    {
+        // Arrange
+        DnsServer writer = CreateServer("stable_writer");
+        DnsServer reader = PrepareServer("stable_reader");
+
+        // Act
+        byte[] firstWrite = WriteConfig(writer);
+        ReadConfig(reader, firstWrite, isConfigTransfer: false);
+        byte[] secondWrite = WriteConfig(reader);
+
+        // Assert
+        Assert.Equal(firstWrite, secondWrite);
+    }
+
+    /// <summary>
+    /// Verifies that a config in the fork version 7 layout (landing page html, no explicit cache prefetch bool)
+    /// loads with all settings intact, which keeps existing fork nodes upgradeable. The prefetch option is absent
+    /// from this layout so it must fall back to its default value.
+    /// </summary>
+    [Fact]
+    public void ForkVersion7Config_ShouldLoadWithAllSettings()
+    {
+        // Arrange
+        byte[] fixture = ToLegacyLayout(
+            WriteSentinelConfig("fork_v7_writer"),
+            AmbiguousConfigVersionV7,
+            hasLandingPageHtml: true,
+            hasEnableCachePrefetchOption: false,
+            hasLegacyCachePrefetchSamplingOptions: false);
+
+        DnsServer reader = PrepareServer("fork_v7_reader");
+
+        // Act
+        long leftover = ReadConfigLeftover(reader, fixture);
+
+        // Assert
+        Assert.Equal(0, leftover);
+        AssertSentinelSettings(reader, expectLandingPageHtml: true, expectEnableCachePrefetch: true);
+    }
+
+    /// <summary>
+    /// Verifies that a config in the upstream v15.6 version 7 layout (explicit cache prefetch bool, no landing page
+    /// html) loads with all settings intact and with the fork landing page reset to its default.
+    /// </summary>
+    [Fact]
+    public void UpstreamVersion7Config_ShouldLoadWithAllSettings()
+    {
+        // Arrange
+        byte[] fixture = ToLegacyLayout(
+            WriteSentinelConfig("upstream_v7_writer"),
+            AmbiguousConfigVersionV7,
+            hasLandingPageHtml: false,
+            hasEnableCachePrefetchOption: true,
+            hasLegacyCachePrefetchSamplingOptions: false);
+
+        DnsServer reader = PrepareServer("upstream_v7_reader");
+
+        // Act
+        long leftover = ReadConfigLeftover(reader, fixture);
+
+        // Assert
+        Assert.Equal(0, leftover);
+        AssertSentinelSettings(reader, expectLandingPageHtml: false, expectEnableCachePrefetch: false);
     }
 
     /// <summary>
@@ -102,8 +179,9 @@ public class ConfigVersionCompatibilityTests : IDisposable
         // Arrange
         byte[] fixture = ToLegacyLayout(
             WriteSentinelConfig("fork_v6_writer"),
-            AmbiguousConfigVersion,
+            AmbiguousConfigVersionV6,
             hasLandingPageHtml: true,
+            hasEnableCachePrefetchOption: false,
             hasLegacyCachePrefetchSamplingOptions: true);
 
         DnsServer reader = PrepareServer("fork_v6_reader");
@@ -113,7 +191,7 @@ public class ConfigVersionCompatibilityTests : IDisposable
 
         // Assert
         Assert.Equal(0, leftover);
-        AssertSentinelSettings(reader, expectLandingPageHtml: true);
+        AssertSentinelSettings(reader, expectLandingPageHtml: true, expectEnableCachePrefetch: true);
     }
 
     /// <summary>
@@ -126,8 +204,9 @@ public class ConfigVersionCompatibilityTests : IDisposable
         // Arrange
         byte[] fixture = ToLegacyLayout(
             WriteSentinelConfig("upstream_v6_writer"),
-            AmbiguousConfigVersion,
+            AmbiguousConfigVersionV6,
             hasLandingPageHtml: false,
+            hasEnableCachePrefetchOption: false,
             hasLegacyCachePrefetchSamplingOptions: false);
 
         DnsServer reader = PrepareServer("upstream_v6_reader");
@@ -137,12 +216,13 @@ public class ConfigVersionCompatibilityTests : IDisposable
 
         // Assert
         Assert.Equal(0, leftover);
-        AssertSentinelSettings(reader, expectLandingPageHtml: false);
+        AssertSentinelSettings(reader, expectLandingPageHtml: false, expectEnableCachePrefetch: true);
     }
 
     /// <summary>
-    /// Verifies that a legacy version 5 config (no landing page html, with the cache prefetch sampling options)
-    /// still loads with all settings intact, since version 5 files are unchanged by the version 6 collision.
+    /// Verifies that a legacy version 5 config (no landing page html, no prefetch bool, with the cache prefetch
+    /// sampling options) still loads with all settings intact, since version 5 files are unchanged by either
+    /// version collision.
     /// </summary>
     [Fact]
     public void LegacyVersion5Config_ShouldLoadWithAllSettings()
@@ -152,6 +232,7 @@ public class ConfigVersionCompatibilityTests : IDisposable
             WriteSentinelConfig("legacy_v5_writer"),
             5,
             hasLandingPageHtml: false,
+            hasEnableCachePrefetchOption: false,
             hasLegacyCachePrefetchSamplingOptions: true);
 
         DnsServer reader = PrepareServer("legacy_v5_reader");
@@ -161,24 +242,28 @@ public class ConfigVersionCompatibilityTests : IDisposable
 
         // Assert
         Assert.Equal(0, leftover);
-        AssertSentinelSettings(reader, expectLandingPageHtml: false);
+        AssertSentinelSettings(reader, expectLandingPageHtml: false, expectEnableCachePrefetch: true);
     }
 
     /// <summary>
-    /// Verifies that all three legacy layouts are also readable in config transfer mode, which is used when a
-    /// cluster node syncs a config from another node and must not be rejected by the version 6 layout probe.
+    /// Verifies that every legacy layout, including both ambiguous versions, is also readable in config transfer
+    /// mode, which is used when a cluster node syncs a config from another node and must not be rejected by the
+    /// layout probes.
     /// </summary>
     [Theory]
-    [InlineData(AmbiguousConfigVersion, true, true)]
-    [InlineData(AmbiguousConfigVersion, false, false)]
-    [InlineData(5, false, true)]
-    public void TransferConfig_ShouldReadEveryLegacyLayout(byte version, bool hasLandingPageHtml, bool hasLegacyCachePrefetchSamplingOptions)
+    [InlineData(AmbiguousConfigVersionV7, true, false, false)]
+    [InlineData(AmbiguousConfigVersionV7, false, true, false)]
+    [InlineData(AmbiguousConfigVersionV6, true, false, true)]
+    [InlineData(AmbiguousConfigVersionV6, false, false, false)]
+    [InlineData(5, false, false, true)]
+    public void TransferConfig_ShouldReadEveryLegacyLayout(byte version, bool hasLandingPageHtml, bool hasEnableCachePrefetchOption, bool hasLegacyCachePrefetchSamplingOptions)
     {
         // Arrange
         byte[] fixture = ToLegacyLayout(
             WriteSentinelConfig("transfer_writer"),
             version,
             hasLandingPageHtml,
+            hasEnableCachePrefetchOption,
             hasLegacyCachePrefetchSamplingOptions);
 
         DnsServer reader = CreateServer("transfer_reader");
@@ -217,15 +302,40 @@ public class ConfigVersionCompatibilityTests : IDisposable
     {
         // Arrange
         byte[] config = ToLegacyLayout(
-            WriteSentinelConfig("truncated_writer"),
-            AmbiguousConfigVersion,
+            WriteSentinelConfig("truncated_v6_writer"),
+            AmbiguousConfigVersionV6,
             hasLandingPageHtml: true,
+            hasEnableCachePrefetchOption: false,
             hasLegacyCachePrefetchSamplingOptions: true);
 
         byte[] truncated = config[..^3];
 
         // Act
-        Exception? failure = ReadConfigFailure(PrepareServer("truncated_reader"), truncated);
+        Exception? failure = ReadConfigFailure(PrepareServer("truncated_v6_reader"), truncated);
+
+        // Assert
+        Assert.IsType<InvalidDataException>(failure);
+    }
+
+    /// <summary>
+    /// Verifies that a truncated version 7 config is rejected with an invalid data error since neither known
+    /// version 7 layout can read it completely.
+    /// </summary>
+    [Fact]
+    public void TruncatedVersion7Config_ShouldBeRejected()
+    {
+        // Arrange
+        byte[] config = ToLegacyLayout(
+            WriteSentinelConfig("truncated_v7_writer"),
+            AmbiguousConfigVersionV7,
+            hasLandingPageHtml: true,
+            hasEnableCachePrefetchOption: false,
+            hasLegacyCachePrefetchSamplingOptions: false);
+
+        byte[] truncated = config[..^3];
+
+        // Act
+        Exception? failure = ReadConfigFailure(PrepareServer("truncated_v7_reader"), truncated);
 
         // Assert
         Assert.IsType<InvalidDataException>(failure);
@@ -265,15 +375,16 @@ public class ConfigVersionCompatibilityTests : IDisposable
         server.ServeStale = true;
         server.CachePrefetchEligibility = PrefetchEligibilitySentinel;
         server.CachePrefetchTrigger = PrefetchTriggerSentinel;
+        server.EnableCachePrefetch = false;
         server.StatsManager.EnableInMemoryStats = true;
         server.StatsManager.MaxStatFileDays = MaxStatFileDaysSentinel;
     }
 
     /// <summary>
-    /// Asserts that all sentinel settings are present on the given server and that the landing page html was
-    /// either restored or reset as the layout requires.
+    /// Asserts that all sentinel settings are present on the given server, that the landing page html was either
+    /// restored or reset as the layout requires, and that the cache prefetch option matches the layout.
     /// </summary>
-    private static void AssertSentinelSettings(DnsServer server, bool expectLandingPageHtml)
+    private static void AssertSentinelSettings(DnsServer server, bool expectLandingPageHtml, bool expectEnableCachePrefetch)
     {
         Assert.Equal(expectLandingPageHtml ? LandingPageMarker : null, server.DohCustomLandingPageHtml);
         Assert.False(server.EnableDnsOverHttpHelpRedirect);
@@ -282,6 +393,7 @@ public class ConfigVersionCompatibilityTests : IDisposable
         Assert.True(server.ServeStale);
         Assert.Equal(PrefetchEligibilitySentinel, server.CachePrefetchEligibility);
         Assert.Equal(PrefetchTriggerSentinel, server.CachePrefetchTrigger);
+        Assert.Equal(expectEnableCachePrefetch, server.EnableCachePrefetch);
         Assert.True(server.StatsManager.EnableInMemoryStats);
         Assert.Equal(MaxStatFileDaysSentinel, server.StatsManager.MaxStatFileDays);
     }
@@ -348,13 +460,14 @@ public class ConfigVersionCompatibilityTests : IDisposable
     }
 
     /// <summary>
-    /// Rewrites a config written by this build into one of the legacy layouts: the given version byte is set,
-    /// the landing page html field is dropped when the layout does not have it and the two legacy cache prefetch
-    /// sampling options are inserted when the layout has them. The pre-merge fork layouts are byte identical to
-    /// the current layout except for the version byte and these two fields, so the fixtures are built from the
-    /// real writer output instead of being copied by hand.
+    /// Rewrites a config written by this build (the version 8 layout) into one of the older layouts: the given
+    /// version byte is set, the landing page html field is dropped when the layout does not have it, the explicit
+    /// cache prefetch bool is dropped when the layout does not have it and the two legacy cache prefetch sampling
+    /// options are inserted when the layout has them. The pre-merge fork and upstream layouts are byte identical
+    /// to the current layout except for the version byte and these fields, so the fixtures are built from the real
+    /// writer output instead of being copied by hand.
     /// </summary>
-    private static byte[] ToLegacyLayout(byte[] config, byte version, bool hasLandingPageHtml, bool hasLegacyCachePrefetchSamplingOptions)
+    private static byte[] ToLegacyLayout(byte[] config, byte version, bool hasLandingPageHtml, bool hasEnableCachePrefetchOption, bool hasLegacyCachePrefetchSamplingOptions)
     {
         List<byte> buffer = [.. config];
 
@@ -365,6 +478,17 @@ public class ConfigVersionCompatibilityTests : IDisposable
             byte[] landingPageField = [(byte)LandingPageMarker.Length, .. Encoding.UTF8.GetBytes(LandingPageMarker)];
             int landingPageIndex = FindSingleIndex(buffer, landingPageField);
             buffer.RemoveRange(landingPageIndex, landingPageField.Length);
+        }
+
+        if (!hasEnableCachePrefetchOption)
+        {
+            //the explicit cache prefetch bool is written immediately before the cache prefetch eligibility option
+            int eligibilityIndex = FindSingleIndex(buffer, BitConverter.GetBytes(PrefetchEligibilitySentinel));
+            byte prefetchOption = buffer[eligibilityIndex - 1];
+
+            Assert.True((prefetchOption == 0) || (prefetchOption == 1), "Test fixture expected the explicit cache prefetch option to be a single serialized bool.");
+
+            buffer.RemoveRange(eligibilityIndex - 1, 1);
         }
 
         if (hasLegacyCachePrefetchSamplingOptions)
