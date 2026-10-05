@@ -1711,7 +1711,7 @@ namespace DnsServerCore
                 return false;
             }
 
-            if (!Version.TryParse(installedUpstreamVersion, out Version installedBaseVersion))
+            if (!System.Version.TryParse(installedUpstreamVersion, out Version installedBaseVersion))
             {
                 LogUpdateCheckWarning(logWarning, "installed upstream", installedUpstreamVersion);
                 return false;
@@ -1748,7 +1748,7 @@ namespace DnsServerCore
             if (!match.Success)
                 return false;
 
-            if (!Version.TryParse(match.Groups[1].Value, out upstreamBaseVersion))
+            if (!System.Version.TryParse(match.Groups[1].Value, out upstreamBaseVersion))
                 return false;
 
             isDevLine = match.Groups[2].Success;
@@ -3161,6 +3161,9 @@ namespace DnsServerCore
 
         public string ConfigFolder
         { get { return _configFolder; } }
+
+        public string Version
+        { get { return GetCleanVersion(_currentVersion); } }
 
         public int WebServiceHttpPort
         { get { return _webServiceHttpPort; } }

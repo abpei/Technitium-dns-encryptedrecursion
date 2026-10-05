@@ -1,7 +1,7 @@
 {
-    "updateVersion": "15.5.1-pidoh.1",
-    "updateTitle": "PiDoH Fork v15.5.1-pidoh.1 Available!",
-    "updateMessage": "Fix: pure-CNAME chains are now always blocklist-checked at the terminal target. CNAME chains ending in a blocked domain are reliably blocked (resolver + Block List API).",
-    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.5.1-pidoh.1",
-    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.5.1-pidoh.1"
+    "updateVersion": "15.6.0-pidoh-dev.0",
+    "updateTitle": "PiDoH Fork v15.6.0-pidoh-dev.0 Available!",
+    "updateMessage": "Rebased onto upstream Technitium DNS Server 15.6.0. Fork DNS config version is now 8: the upstream v7 layout (explicit cache prefetch option) plus the fork DoH custom landing page. Config files written by the previous v15.5 based builds (versions 6 and 7) are probed and migrated automatically. Includes the upstream 15.6.0 security fixes.",
+    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.6.0-pidoh-dev.0",
+    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.6.0-pidoh-dev.0"
 }

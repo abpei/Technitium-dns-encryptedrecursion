@@ -245,6 +245,7 @@ namespace DnsServerCore.Dns
         bool _saveCacheToDisk = true;
         bool _serveStale = true;
         int _serveStaleMaxWaitTime = SERVE_STALE_MAX_WAIT_TIME;
+        bool _enableCachePrefetch = true;
         int _cachePrefetchEligibility = 2;
         int _cachePrefetchTrigger = 9;
 
@@ -657,17 +658,22 @@ namespace DnsServerCore.Dns
             }
         }
 
-        //Config version written by this build. Version 7 is the upstream v15.5 version 6 layout with the fork's
-        //DoH custom landing page html appended.
-        const byte DNS_CONFIG_VERSION = 7;
+        //Config version written by this build. Version 8 is the upstream v15.6 version 7 layout (which added the
+        //explicit cache prefetch bool) with the fork's DoH custom landing page html appended.
+        const byte DNS_CONFIG_VERSION = 8;
 
         //Version 6 was written by upstream v15.5 and by older builds of this fork using incompatible layouts, so
         //a version 6 config file must be probed to find out which of the two layouts it was written with.
         const byte DNS_CONFIG_VERSION_AMBIGUOUS = 6;
 
+        //Version 7 was written by upstream v15.6 (explicit cache prefetch bool, no landing page html) and by this
+        //fork based on upstream v15.5 (DoH landing page html, no prefetch bool) using incompatible layouts, so a
+        //version 7 config file must be probed just like version 6.
+        const byte DNS_CONFIG_VERSION_AMBIGUOUS_V7 = 7;
+
         private void ReadConfigFrom(Stream s, bool isConfigTransfer)
         {
-            //buffer the config since the version 6 layout probe below needs to re-read the same data
+            //buffer the config since the ambiguous version probes below need to re-read the same data
             using (MemoryStream configBuffer = new MemoryStream())
             {
                 s.CopyTo(configBuffer);
@@ -675,45 +681,96 @@ namespace DnsServerCore.Dns
 
                 byte version = ReadConfigHeader(configBuffer);
 
-                if (version != DNS_CONFIG_VERSION_AMBIGUOUS)
+                if (version == DNS_CONFIG_VERSION_AMBIGUOUS)
                 {
-                    //versions 1 to 5 have the legacy cache prefetch sampling options and no DoH landing page html;
-                    //versions 7 and above have the DoH landing page html and no legacy cache prefetch sampling options
-                    ReadConfigBody(configBuffer, version, version > DNS_CONFIG_VERSION_AMBIGUOUS, version < DNS_CONFIG_VERSION_AMBIGUOUS, isConfigTransfer);
+                    ProbeAmbiguousVersion6(configBuffer, isConfigTransfer);
                     return;
                 }
 
-                //version 6 is ambiguous: upstream v15.5 dropped the legacy cache prefetch sampling options while this
-                //fork kept them and appended the DoH landing page html. Try the fork layout first since all existing
-                //fork deployments use it, and fall back to the upstream layout. A layout is accepted only when it
-                //reads the config completely, so that a probe cannot silently load garbage settings.
-                Exception forkLayoutError;
-
-                try
+                if (version == DNS_CONFIG_VERSION_AMBIGUOUS_V7)
                 {
-                    ReadConfigBody(configBuffer, version, true, true, isConfigTransfer);
-                    ValidateConfigFullyRead(configBuffer);
+                    ProbeAmbiguousVersion7(configBuffer, isConfigTransfer);
                     return;
                 }
-                catch (Exception ex)
-                {
-                    forkLayoutError = ex;
-                }
 
-                configBuffer.Position = 0;
-                ReadConfigHeader(configBuffer);
+                //versions 1 to 5 have the legacy cache prefetch sampling options and neither the DoH landing page
+                //html nor the cache prefetch option; version 8 and above have the DoH landing page html and the
+                //cache prefetch option and no legacy cache prefetch sampling options
+                ReadConfigBody(configBuffer, version, version > DNS_CONFIG_VERSION_AMBIGUOUS_V7, version > DNS_CONFIG_VERSION_AMBIGUOUS_V7, version < DNS_CONFIG_VERSION_AMBIGUOUS, isConfigTransfer);
+            }
+        }
 
-                try
-                {
-                    ReadConfigBody(configBuffer, version, false, false, isConfigTransfer);
-                    ValidateConfigFullyRead(configBuffer);
-                    return;
-                }
-                catch (Exception)
-                {
-                    //neither of the two known version 6 layouts could read this config file
-                    throw new InvalidDataException("DNS Server config version 6 file layout is not supported.", forkLayoutError);
-                }
+        /// <summary>
+        /// Reads a version 6 config, which upstream v15.5 and this fork wrote with incompatible layouts. The fork
+        /// layout is tried first since all existing fork deployments use it, then the upstream layout. A layout is
+        /// accepted only when it reads the config completely, so that a probe cannot silently load garbage settings.
+        /// </summary>
+        private void ProbeAmbiguousVersion6(Stream configBuffer, bool isConfigTransfer)
+        {
+            Exception forkLayoutError;
+
+            try
+            {
+                ReadConfigBody(configBuffer, DNS_CONFIG_VERSION_AMBIGUOUS, true, false, true, isConfigTransfer);
+                ValidateConfigFullyRead(configBuffer);
+                return;
+            }
+            catch (Exception ex)
+            {
+                forkLayoutError = ex;
+            }
+
+            configBuffer.Position = 0;
+            ReadConfigHeader(configBuffer);
+
+            try
+            {
+                ReadConfigBody(configBuffer, DNS_CONFIG_VERSION_AMBIGUOUS, false, false, false, isConfigTransfer);
+                ValidateConfigFullyRead(configBuffer);
+                return;
+            }
+            catch (Exception)
+            {
+                //neither of the two known version 6 layouts could read this config file
+                throw new InvalidDataException("DNS Server config version 6 file layout is not supported.", forkLayoutError);
+            }
+        }
+
+        /// <summary>
+        /// Reads a version 7 config, which upstream v15.6 and this fork wrote with incompatible layouts. The fork
+        /// layout (DoH landing page html, no explicit cache prefetch bool) is tried first since existing fork
+        /// deployments use it, then the upstream layout (explicit cache prefetch bool, no landing page html). A
+        /// layout is accepted only when it reads the config completely, so that a probe cannot silently load
+        /// garbage settings.
+        /// </summary>
+        private void ProbeAmbiguousVersion7(Stream configBuffer, bool isConfigTransfer)
+        {
+            Exception forkLayoutError;
+
+            try
+            {
+                ReadConfigBody(configBuffer, DNS_CONFIG_VERSION_AMBIGUOUS_V7, true, false, false, isConfigTransfer);
+                ValidateConfigFullyRead(configBuffer);
+                return;
+            }
+            catch (Exception ex)
+            {
+                forkLayoutError = ex;
+            }
+
+            configBuffer.Position = 0;
+            ReadConfigHeader(configBuffer);
+
+            try
+            {
+                ReadConfigBody(configBuffer, DNS_CONFIG_VERSION_AMBIGUOUS_V7, false, true, false, isConfigTransfer);
+                ValidateConfigFullyRead(configBuffer);
+                return;
+            }
+            catch (Exception)
+            {
+                //neither of the two known version 7 layouts could read this config file
+                throw new InvalidDataException("DNS Server config version 7 file layout is not supported.", forkLayoutError);
             }
         }
 
@@ -744,10 +801,11 @@ namespace DnsServerCore.Dns
         }
 
         /// <summary>
-        /// Reads the config body. The DoH landing page html and the legacy cache prefetch sampling options are not
-        /// present in all config layouts, so they are controlled by flags instead of being derived from the version.
+        /// Reads the config body. The DoH landing page html, the explicit cache prefetch option and the legacy
+        /// cache prefetch sampling options are not present in all config layouts, so they are controlled by flags
+        /// instead of being derived from the version.
         /// </summary>
-        private void ReadConfigBody(Stream s, int version, bool hasDohCustomLandingPageHtml, bool hasLegacyCachePrefetchSamplingOptions, bool isConfigTransfer)
+        private void ReadConfigBody(Stream s, int version, bool hasDohCustomLandingPageHtml, bool hasEnableCachePrefetchOption, bool hasLegacyCachePrefetchSamplingOptions, bool isConfigTransfer)
         {
             BinaryReader bR = new BinaryReader(s);
 
@@ -1171,13 +1229,33 @@ namespace DnsServerCore.Dns
             if (!isConfigTransfer)
                 _cacheZoneManager.FailureRecordTtl = failureRecordTtl;
 
+            if (hasEnableCachePrefetchOption)
+            {
+                bool enableCachePrefetch = bR.ReadBoolean();
+                if (!isConfigTransfer)
+                    _enableCachePrefetch = enableCachePrefetch;
+            }
+            else
+            {
+                if (!isConfigTransfer)
+                    _enableCachePrefetch = true;
+            }
+
             int cachePrefetchEligibility = bR.ReadInt32();
             if (!isConfigTransfer)
                 _cachePrefetchEligibility = cachePrefetchEligibility;
 
             int cachePrefetchTrigger = bR.ReadInt32();
             if (!isConfigTransfer)
+            {
                 _cachePrefetchTrigger = cachePrefetchTrigger;
+
+                if (!hasEnableCachePrefetchOption)
+                {
+                    if (_cachePrefetchTrigger < 1)
+                        _enableCachePrefetch = false;
+                }
+            }
 
             if (hasLegacyCachePrefetchSamplingOptions)
             {
@@ -1517,6 +1595,7 @@ namespace DnsServerCore.Dns
             bW.Write(_cacheZoneManager.NegativeRecordTtl);
             bW.Write(_cacheZoneManager.FailureRecordTtl);
 
+            bW.Write(_enableCachePrefetch);
             bW.Write(_cachePrefetchEligibility);
             bW.Write(_cachePrefetchTrigger);
 
@@ -3880,7 +3959,7 @@ namespace DnsServerCore.Dns
                 }
             }
 
-            DnsDatagram xfrResponse = new DnsDatagram(request.Identifier, true, DnsOpcode.StandardQuery, true, false, request.RecursionDesired, false, false, false, DnsResponseCode.NoError, request.Question, xfrRecords, udpPayloadSize: _udpPayloadSize, options: eDnsOptions) { Tag = DnsServerResponseType.Authoritative };
+            DnsDatagram xfrResponse = new DnsDatagram(request.Identifier, true, DnsOpcode.StandardQuery, true, false, request.RecursionDesired, false, false, false, DnsResponseCode.NoError, request.Question, xfrRecords, udpPayloadSize: request.EDNS is null ? ushort.MinValue : _udpPayloadSize, options: eDnsOptions) { Tag = DnsServerResponseType.Authoritative };
             xfrResponse = xfrResponse.Split();
 
             //update notify failed list
@@ -4043,7 +4122,7 @@ namespace DnsServerCore.Dns
             DnsDatagram appResponse = await AppAuthoritativeQueryAsync(request, protocol, isRecursionAllowed, remoteEP);
             if (appResponse is not null)
             {
-                if ((appResponse.RCODE != DnsResponseCode.NoError) || (appResponse.Answer.Count > 0) || (appResponse.Authority.Count == 0) || appResponse.IsFirstAuthoritySOA())
+                if ((appResponse.RCODE != DnsResponseCode.NoError) || (appResponse.Answer.Count > 0) || (appResponse.Authority.Count == 0) || appResponse.IsFirstAuthoritySOAOrFWD())
                     return appResponse;
             }
 
@@ -5042,7 +5121,7 @@ namespace DnsServerCore.Dns
                 DnsDatagram cacheResponse = QueryCache(request, false, false);
                 if (cacheResponse is not null)
                 {
-                    if (_cachePrefetchTrigger > 0)
+                    if (_enableCachePrefetch)
                     {
                         //inspect response TTL values to decide if prefetch trigger is needed
                         foreach (DnsResourceRecord answer in cacheResponse.Answer)
@@ -5058,7 +5137,11 @@ namespace DnsServerCore.Dns
                                 }
 
                                 //trigger prefetch async for this specific answer record
-                                _ = PrefetchCacheAsync(new DnsQuestionRecord(answer.Name, question.Type, question.Class), remoteEP, conditionalForwarders, dnssecValidation, eDnsClientSubnet, advancedForwardingClientSubnet);
+                                DnsQuestionRecord triggerQuestion = new DnsQuestionRecord(answer.Name, question.Type, question.Class);
+
+                                if (!_resolverTasks.ContainsKey(GetResolverQueryKey(triggerQuestion, eDnsClientSubnet))) //check if prefetch is already triggered
+                                    _ = PrefetchCacheAsync(triggerQuestion, remoteEP, conditionalForwarders, dnssecValidation, eDnsClientSubnet, advancedForwardingClientSubnet);
+
                                 break;
                             }
                         }
@@ -5160,7 +5243,7 @@ namespace DnsServerCore.Dns
 
             //no response available; respond with ServerFailure
             EDnsOption[] options = [new EDnsOption(EDnsOptionCode.EXTENDED_DNS_ERROR, new EDnsExtendedDnsErrorOptionData(EDnsExtendedDnsErrorCode.Other, "Waiting for resolver. Please try again."))];
-            return new DnsDatagram(request.Identifier, true, DnsOpcode.StandardQuery, false, false, request.RecursionDesired, true, false, request.CheckingDisabled, DnsResponseCode.ServerFailure, request.Question, null, null, null, _udpPayloadSize, dnssecValidation ? EDnsHeaderFlags.DNSSEC_OK : EDnsHeaderFlags.None, options);
+            return new DnsDatagram(request.Identifier, true, DnsOpcode.StandardQuery, false, false, request.RecursionDesired, true, false, request.CheckingDisabled, DnsResponseCode.ServerFailure, request.Question, null, null, null, request.EDNS is null ? ushort.MinValue : _udpPayloadSize, dnssecValidation ? EDnsHeaderFlags.DNSSEC_OK : EDnsHeaderFlags.None, options);
         }
 
         private async Task RecursiveResolverBackgroundTaskAsync(DnsQuestionRecord question, NetworkAddress eDnsClientSubnet, bool advancedForwardingClientSubnet, IReadOnlyList<DnsResourceRecord> conditionalForwarders, bool dnssecValidation, bool cachePrefetchOperation, bool skipDnsAppAuthoritativeRequestHandlers, TaskCompletionSource<RecursiveResolveResponse> taskCompletionSource, DnsClient.ResolverContext context)
@@ -7910,6 +7993,18 @@ namespace DnsServerCore.Dns
             }
         }
 
+        public bool EnableCachePrefetch
+        {
+            get { return _enableCachePrefetch; }
+            set
+            {
+                _enableCachePrefetch = value;
+
+                if (_enableCachePrefetch && (_cachePrefetchTrigger < 1))
+                    _cachePrefetchTrigger = 9;
+            }
+        }
+
         public int CachePrefetchEligibility
         {
             get { return _cachePrefetchEligibility; }
@@ -7931,6 +8026,9 @@ namespace DnsServerCore.Dns
                     throw new ArgumentOutOfRangeException(nameof(CachePrefetchTrigger), "Valid value is greater that or equal to 0.");
 
                 _cachePrefetchTrigger = value;
+
+                if (_cachePrefetchTrigger < 1)
+                    _enableCachePrefetch = false;
             }
         }
 

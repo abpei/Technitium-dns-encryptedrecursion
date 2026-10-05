@@ -328,6 +328,7 @@ namespace DnsServerCore
                 jsonWriter.WriteNumber("cacheNegativeRecordTtl", _dnsWebService._dnsServer.CacheZoneManager.NegativeRecordTtl);
                 jsonWriter.WriteNumber("cacheFailureRecordTtl", _dnsWebService._dnsServer.CacheZoneManager.FailureRecordTtl);
 
+                jsonWriter.WriteBoolean("enableCachePrefetch", _dnsWebService._dnsServer.EnableCachePrefetch);
                 jsonWriter.WriteNumber("cachePrefetchEligibility", _dnsWebService._dnsServer.CachePrefetchEligibility);
                 jsonWriter.WriteNumber("cachePrefetchTrigger", _dnsWebService._dnsServer.CachePrefetchTrigger);
 
@@ -1470,6 +1471,9 @@ namespace DnsServerCore
 
                         if (request.TryGetQueryOrForm("cachePrefetchTrigger", int.Parse, out int cachePrefetchTrigger))
                             _dnsWebService._dnsServer.CachePrefetchTrigger = cachePrefetchTrigger;
+
+                        if (request.TryGetQueryOrForm("enableCachePrefetch", bool.Parse, out bool enableCachePrefetch))
+                            _dnsWebService._dnsServer.EnableCachePrefetch = enableCachePrefetch;
 
                         #endregion
 
