@@ -274,20 +274,23 @@ namespace DnsServerCore.Dns.ZoneManagers
                     if (!isConfigTransfer)
                         _blockListLastUpdatedOn = blockListLastUpdatedOn;
 
-                    if (blockListUrls.Length > 0)
+                    if (!isConfigTransfer)
                     {
-                        //load block list URLs async
-                        ThreadPool.QueueUserWorkItem(delegate (object state)
+                        if (blockListUrls.Length > 0)
                         {
-                            try
+                            //load block list URLs async
+                            ThreadPool.QueueUserWorkItem(delegate (object state)
                             {
-                                LoadBlockLists();
-                            }
-                            catch (Exception ex)
-                            {
-                                _dnsServer.LogManager.Write(ex);
-                            }
-                        });
+                                try
+                                {
+                                    LoadBlockLists();
+                                }
+                                catch (Exception ex)
+                                {
+                                    _dnsServer.LogManager.Write(ex);
+                                }
+                            });
+                        }
                     }
 
                     ApplyBlockListUrls(blockListUrls);
@@ -720,9 +723,13 @@ namespace DnsServerCore.Dns.ZoneManagers
                     if (await UpdateBlockListsAsync(forceReload))
                     {
                         //block lists were updated
-                        //save last updated on time
                         _blockListLastUpdatedOn = DateTime.UtcNow;
-                        SaveConfigFile();
+
+                        //lazy save last updated on time
+                        lock (_saveLock)
+                        {
+                            _pendingSave = true;
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -748,9 +755,13 @@ namespace DnsServerCore.Dns.ZoneManagers
                             if (await UpdateBlockListsAsync(_blockListLastUpdatedOn == default))
                             {
                                 //block lists were updated
-                                //save last updated on time
                                 _blockListLastUpdatedOn = DateTime.UtcNow;
-                                SaveConfigFile();
+
+                                //lazy save last updated on time
+                                lock (_saveLock)
+                                {
+                                    _pendingSave = true;
+                                }
                             }
                         }
                     }
