@@ -1,7 +1,7 @@
 {
-    "updateVersion": "15.6.1-pidoh-dev.0",
-    "updateTitle": "PiDoH Fork v15.6.1-pidoh-dev.0 Available!",
-    "updateMessage": "Rebased onto upstream Technitium DNS Server 15.6.1. Includes the upstream LDAP auth fixes (StartTLS/LDAPS on Linux), the block list config-transfer and lazy-save changes, the CNAME negative cache fix, and the NOTIFY/IXFR interop fixes. Fork DNS config version remains 8: the upstream v7 layout plus the fork DoH custom landing page, with the existing probe migrating older config files automatically.",
-    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.6.1-pidoh-dev.0",
-    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.6.1-pidoh-dev.0"
+    "updateVersion": "15.6.2-pidoh-dev.0",
+    "updateTitle": "PiDoH Fork v15.6.2-pidoh-dev.0 Available!",
+    "updateMessage": "Rebased onto upstream Technitium DNS Server 15.6.2. Includes the upstream cluster config sync fixes, the zone boundary check and UDP socket receive packet security fixes, and clickable dashboard stats that open Query Logs with the relevant filter. Fork DNS config version remains 8: the upstream v7 layout plus the fork DoH custom landing page, with the existing probe migrating older config files automatically.",
+    "instructionsLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.6.2-pidoh-dev.0",
+    "changeLogLink": "https://github.com/abpei/Technitium-dns-encryptedrecursion/releases/tag/v15.6.2-pidoh-dev.0"
 }
